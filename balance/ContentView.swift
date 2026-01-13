@@ -11,10 +11,19 @@ import CryptoKit
 struct ContentView: View {
     @State private var store: Store = Store.load()
     @State private var selectedTab: Tab = .dashboard
+
+    // Debounced persistence
     @State private var saveWorkItem: DispatchWorkItem? = nil
+
+    // Debounced smart-rule evaluation to prevent repeated scheduling/firing
+    @State private var notifEvalWorkItem: DispatchWorkItem? = nil
+    @State private var didSyncNotifications: Bool = false
+
     @AppStorage("notifications.enabled")
     private var notificationsEnabled: Bool = false
+
     private let saveDebounceSeconds: TimeInterval = 0.6
+    private let notifEvalDebounceSeconds: TimeInterval = 0.9
 
     var body: some View {
         ZStack {
@@ -43,19 +52,27 @@ struct ContentView: View {
                     NotificationCenterDelegate.shared
 
                 // اگر قبلاً نوتیف روشن بوده، ruleها فعال باشن
-                if notificationsEnabled {
+                // (فقط یکبار در هر اجرای برنامه سینک کن تا نوتیف تکراری ساخته نشه)
+                if notificationsEnabled && !didSyncNotifications {
+                    didSyncNotifications = true
                     Task {
                         await Notifications.syncAll(store: store)
                     }
                 }
             }
-            .onChange(of: store) { _, _ in
+            .onChange(of: store) { _, newStore in
                 // هر تغییری در store (اضافه/ادیت/حذف ترنزکشن)
-                // فوراً ruleها رو بررسی کن
+                // ruleها رو با debounce بررسی کن تا نوتیف تکراری ساخته/فایر نشه
                 guard notificationsEnabled else { return }
-                Task {
-                    await Notifications.evaluateSmartRules(store: store)
+
+                notifEvalWorkItem?.cancel()
+                let item = DispatchWorkItem {
+                    Task {
+                        await Notifications.evaluateSmartRules(store: newStore)
+                    }
                 }
+                notifEvalWorkItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + notifEvalDebounceSeconds, execute: item)
             }
             .onChange(of: store) { _, newValue in
                 // Debounce saves to avoid writing on every keystroke / UI state change.
@@ -618,6 +635,40 @@ private struct TransactionsView: View {
     // --- Multi-select state for Transactions screen ---
     @State private var isSelecting = false
     @State private var selectedTxIDs: Set<UUID> = []
+    
+    // --- Undo delete ---
+    @State private var pendingUndo: [Transaction] = []
+    @State private var showUndoBar: Bool = false
+    @State private var undoWorkItem: DispatchWorkItem? = nil
+    private let undoDelay: TimeInterval = 4.0
+    private let undoAnim: Animation = .spring(response: 0.45, dampingFraction: 0.90)
+    
+    private func scheduleUndoCommit() {
+        undoWorkItem?.cancel()
+
+        withAnimation(undoAnim) {
+            showUndoBar = true
+        }
+
+        let item = DispatchWorkItem {
+            withAnimation(undoAnim) {
+                pendingUndo.removeAll()
+                showUndoBar = false
+            }
+        }
+
+        undoWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + undoDelay, execute: item)
+    }
+
+    private func undoDelete() {
+        undoWorkItem?.cancel()
+        withAnimation(uiAnim) {
+            store.transactions.append(contentsOf: pendingUndo)
+        }
+        pendingUndo.removeAll()
+        showUndoBar = false
+    }
 
     private let uiAnim = Animation.spring(response: 0.35, dampingFraction: 0.9, blendDuration: 0.0)
 
@@ -811,10 +862,15 @@ private struct TransactionsView: View {
                             let id = pendingDeleteID
                             pendingDeleteID = nil
 
-                            guard let id else { return }
+                            guard let id,
+                                  let tx = store.transactions.first(where: { $0.id == id }) else { return }
+
+                            // remove now + show undo
+                            pendingUndo = [tx]
                             withAnimation(uiAnim) {
                                 store.transactions.removeAll { $0.id == id }
                             }
+                            scheduleUndoCommit()
                         }
                         Button("Cancel", role: .cancel) {
                             pendingDeleteID = nil
@@ -822,9 +878,36 @@ private struct TransactionsView: View {
                     } message: {
                         Text("This action can’t be undone.")
                     }
+                    .safeAreaInset(edge: .bottom) {
+                        if showUndoBar {
+                            HStack {
+                                Text("\(pendingUndo.count) transaction deleted")
+                                    .foregroundStyle(DS.Colors.text)
+
+                                Spacer()
+
+                                Button("Undo") {
+                                    undoDelete()
+                                }
+                                .foregroundStyle(DS.Colors.positive)
+                            }
+                            .padding()
+                            .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(DS.Colors.grid, lineWidth: 1)
+                            )
+                            .shadow(color: Color.black.opacity(0.35), radius: 18, x: 0, y: 10)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                            .scaleEffect(0.98)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
                 }
             }
             .navigationTitle("Transactions")
+            
             .toolbar { toolbarItems }
             .searchable(text: $search, prompt: "Search category / note")
             .confirmationDialog(
@@ -836,6 +919,9 @@ private struct TransactionsView: View {
                     // Capture selection first
                     let ids = selectedTxIDs
 
+                    // stash for undo
+                    pendingUndo = store.transactions.filter { ids.contains($0.id) }
+
                     // Dismiss dialog + exit selecting mode BEFORE mutating the list
                     showBulkDeletePopover = false
                     isSelecting = false
@@ -844,6 +930,7 @@ private struct TransactionsView: View {
                     withAnimation(uiAnim) {
                         store.transactions.removeAll { ids.contains($0.id) }
                     }
+                    scheduleUndoCommit()
                 }
                 Button("Cancel", role: .cancel) {
                     showBulkDeletePopover = false
@@ -3616,21 +3703,55 @@ private enum Notifications {
             }
         } else {
             // Repeatable 70/80 alerts while not over-budget.
-            if summary.spentRatio >= 0.70 {
-                let id = t70Prefix + UUID().uuidString
-                await scheduleImmediate(
-                    id: id,
-                    title: "Budget alert",
-                    body: "You’ve used 70% of your monthly budget. Consider trimming discretionary spending this week."
-                )
-            }
+            // 70/80 alerts (edge-triggered, once per month).
+            // We keep a simple state so entering Insights or re-evaluations don't spam.
+            let thresholdStateKey = "balance.notif.threshold.state." + mKey
+            let lastState = UserDefaults.standard.string(forKey: thresholdStateKey) ?? "none" // none | t70 | t80
+
+            let newState: String
             if summary.spentRatio >= 0.80 {
-                let id = t80Prefix + UUID().uuidString
-                await scheduleImmediate(
-                    id: id,
-                    title: "Budget warning",
-                    body: "You’ve used 80% of your monthly budget. Tighten spending to avoid exceeding your limit."
-                )
+                newState = "t80"
+            } else if summary.spentRatio >= 0.70 {
+                newState = "t70"
+            } else {
+                newState = "none"
+            }
+
+            if newState == "none" {
+                // Reset once we are back under 70% so future crossings can notify again.
+                if lastState != "none" {
+                    UserDefaults.standard.removeObject(forKey: thresholdStateKey)
+                }
+            } else {
+                // Only notify on upward transitions (none -> t70, t70 -> t80, none -> t80).
+                let shouldNotify: Bool
+                if lastState == "none" {
+                    shouldNotify = true
+                } else if lastState == "t70" && newState == "t80" {
+                    shouldNotify = true
+                } else {
+                    shouldNotify = false
+                }
+
+                if shouldNotify {
+                    UserDefaults.standard.set(newState, forKey: thresholdStateKey)
+
+                    if newState == "t70" {
+                        let id = t70Prefix + mKey
+                        await scheduleImmediate(
+                            id: id,
+                            title: "Budget alert",
+                            body: "You’ve used 70% of your monthly budget. Consider trimming discretionary spending this week."
+                        )
+                    } else {
+                        let id = t80Prefix + mKey
+                        await scheduleImmediate(
+                            id: id,
+                            title: "Budget warning",
+                            body: "You’ve used 80% of your monthly budget. Tighten spending to avoid exceeding your limit."
+                        )
+                    }
+                }
             }
         }
 
@@ -4271,7 +4392,7 @@ private struct ImportTransactionsScreen: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Recommended CSV columns (header row preferred):")
                                 Text("date (required), amount (required, EUR), category (required), note (optional)")
-                                Text("Note: A CSV can’t be imported twice to prevent transactions from mixing or being double-counted.")
+                                Text("Note: If you import the same CSV again, Balance will only add transactions that aren’t already in the app (duplicates are skipped).")
                             }
                                 .font(DS.Typography.caption)
                                 .foregroundStyle(DS.Colors.subtext)
@@ -4628,15 +4749,12 @@ private struct ImportTransactionsScreen: View {
             added += 1
         }
 
-        // If the CSV contains any duplicates of already-imported data, abort the import
-        // to avoid mixing and double-counting.
-        if dupesFound > 0 {
-            statusText = "Import cancelled: \(dupesFound) duplicate transaction(s) detected (already in Balance or repeated in the CSV)."
-            return
-        }
-
         if added == 0 {
-            statusText = "No rows imported. Check date format and amount values."
+            if dupesFound > 0 {
+                statusText = "Nothing new to import. \(dupesFound) duplicate transaction(s) detected and skipped."
+            } else {
+                statusText = "No rows imported. Check date format and amount values."
+            }
             return
         }
 
@@ -4657,7 +4775,7 @@ private struct ImportTransactionsScreen: View {
 
         store.save()
         Haptics.success()
-        statusText = "Imported \(added) transactions. Skipped \(skipped)."
+        statusText = "Imported \(added) new transaction(s). Skipped \(skipped). Duplicates skipped: \(dupesFound)."
     }
 
     // MARK: Models
@@ -4776,6 +4894,5 @@ private enum CSV {
         return rows.map { $0.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
     }
 }
-
 
 
