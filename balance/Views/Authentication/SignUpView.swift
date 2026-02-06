@@ -7,6 +7,8 @@ struct SignUpView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
+    @State private var showPassword = false
+    @State private var showConfirmPassword = false
     @State private var showError = false
     @State private var errorText = ""
     
@@ -19,7 +21,7 @@ struct SignUpView: View {
                 
                 ScrollView {
                     VStack(spacing: 24) {
-                        Spacer().frame(height: 40)
+                        Spacer().frame(height: 20)
                         
                         // Logo & Title
                         VStack(spacing: 12) {
@@ -40,7 +42,7 @@ struct SignUpView: View {
                                 .font(DS.Typography.title)
                                 .foregroundStyle(DS.Colors.text)
                         }
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 8)
                         
                         // Sign Up Form
                         DS.Card {
@@ -68,9 +70,36 @@ struct SignUpView: View {
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                     
-                                    SecureField("At least 6 characters", text: $password)
-                                        .textFieldStyle(DS.TextFieldStyle())
+                                    HStack(spacing: 0) {
+                                        Group {
+                                            if showPassword {
+                                                TextField("At least 6 characters", text: $password)
+                                            } else {
+                                                SecureField("At least 6 characters", text: $password)
+                                            }
+                                        }
                                         .textContentType(.newPassword)
+                                        .autocapitalization(.none)
+                                        
+                                        Button {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                                showPassword.toggle()
+                                            }
+                                        } label: {
+                                            Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                                .font(.system(size: 16))
+                                                .foregroundStyle(DS.Colors.subtext)
+                                                .frame(width: 44, height: 44)
+                                                .contentShape(Rectangle())
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(DS.Colors.grid, lineWidth: 1)
+                                    )
                                 }
                                 
                                 // Confirm Password
@@ -79,13 +108,69 @@ struct SignUpView: View {
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                     
-                                    SecureField("Re-enter password", text: $confirmPassword)
-                                        .textFieldStyle(DS.TextFieldStyle())
+                                    HStack(spacing: 0) {
+                                        Group {
+                                            if showConfirmPassword {
+                                                TextField("Re-enter password", text: $confirmPassword)
+                                            } else {
+                                                SecureField("Re-enter password", text: $confirmPassword)
+                                            }
+                                        }
                                         .textContentType(.newPassword)
+                                        .autocapitalization(.none)
+                                        
+                                        Button {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                                showConfirmPassword.toggle()
+                                            }
+                                        } label: {
+                                            Image(systemName: showConfirmPassword ? "eye.slash.fill" : "eye.fill")
+                                                .font(.system(size: 16))
+                                                .foregroundStyle(DS.Colors.subtext)
+                                                .frame(width: 44, height: 44)
+                                                .contentShape(Rectangle())
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(DS.Colors.grid, lineWidth: 1)
+                                    )
                                 }
                                 
-                                // Password Requirements
-                                VStack(alignment: .leading, spacing: 4) {
+                                // Password Requirements + Strength
+                                VStack(alignment: .leading, spacing: 8) {
+                                    // Strength Bar
+                                    if !password.isEmpty {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack {
+                                                Text("Password Strength:")
+                                                    .font(DS.Typography.caption)
+                                                    .foregroundStyle(DS.Colors.subtext)
+                                                
+                                                Text(passwordStrengthText)
+                                                    .font(.system(size: 12, weight: .semibold))
+                                                    .foregroundStyle(passwordStrengthColor)
+                                            }
+                                            
+                                            GeometryReader { geo in
+                                                ZStack(alignment: .leading) {
+                                                    RoundedRectangle(cornerRadius: 4)
+                                                        .fill(DS.Colors.surface2)
+                                                    
+                                                    RoundedRectangle(cornerRadius: 4)
+                                                        .fill(passwordStrengthColor)
+                                                        .frame(width: geo.size.width * passwordStrength)
+                                                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: passwordStrength)
+                                                }
+                                            }
+                                            .frame(height: 6)
+                                        }
+                                    }
+                                    
+                                    // Requirements
                                     HStack(spacing: 4) {
                                         Image(systemName: password.count >= 6 ? "checkmark.circle.fill" : "circle")
                                             .foregroundStyle(password.count >= 6 ? DS.Colors.positive : DS.Colors.subtext)
@@ -162,9 +247,39 @@ struct SignUpView: View {
         }
     }
     
+    // MARK: - Password Strength
+    
+    private var passwordStrength: Double {
+        let length = password.count
+        var strength = 0.0
+        
+        if length >= 6 { strength += 0.25 }
+        if length >= 8 { strength += 0.25 }
+        if password.rangeOfCharacter(from: .uppercaseLetters) != nil { strength += 0.15 }
+        if password.rangeOfCharacter(from: .lowercaseLetters) != nil { strength += 0.15 }
+        if password.rangeOfCharacter(from: .decimalDigits) != nil { strength += 0.1 }
+        if password.rangeOfCharacter(from: CharacterSet(charactersIn: "!@#$%^&*()_+-=[]{}|;:,.<>?")) != nil { strength += 0.1 }
+        
+        return min(strength, 1.0)
+    }
+    
+    private var passwordStrengthText: String {
+        if passwordStrength < 0.3 { return "Weak" }
+        if passwordStrength < 0.6 { return "Fair" }
+        if passwordStrength < 0.8 { return "Good" }
+        return "Strong"
+    }
+    
+    private var passwordStrengthColor: Color {
+        if passwordStrength < 0.3 { return .red }
+        if passwordStrength < 0.6 { return .orange }
+        if passwordStrength < 0.8 { return .yellow }
+        return .green
+    }
+    
     private var isFormValid: Bool {
-        !email.isEmpty && 
-        password.count >= 6 && 
+        !email.isEmpty &&
+        password.count >= 6 &&
         password == confirmPassword
     }
     

@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import AuthenticationServices
 import CryptoKit
 import FirebaseAuth
@@ -70,7 +71,7 @@ extension AppleSignInManager: ASAuthorizationControllerDelegate {
         
         // Create Firebase credential
         let credential = OAuthProvider.credential(
-            withProviderID: "apple.com",
+            providerID: AuthProviderID.apple,
             idToken: idTokenString,
             rawNonce: nonce
         )

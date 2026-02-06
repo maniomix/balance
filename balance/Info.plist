@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLName</key>
+            <string>com.giora.balance</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>balance</string>
+                <!-- این خط جدید را برای گوگل اضافه کردیم -->
+                <string>com.googleusercontent.apps.931720596979-cb3vp3d3beib07ju95b6bi6mc0spkbma</string>
+            </array>
+        </dict>
+    </array>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-notification</string>
+    </array>
+    <!-- همچنین مطمئن شوید که GIDClientID را هم دارید -->
+    <key>GIDClientID</key>
+    <string>931720596979-cb3vp3d3beib07ju95b6bi6mc0spkbma.apps.googleusercontent.com</string>
+</dict>
+</plist>

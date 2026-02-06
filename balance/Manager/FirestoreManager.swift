@@ -20,16 +20,14 @@ class FirestoreManager: ObservableObject {
     
     // MARK: - Save Store to Firestore
     
-    func saveStore(_ store: Store) async throws {
-        guard let userDoc = userDocumentRef() else {
-            throw FirestoreError.notAuthenticated
-        }
+    func saveStore(_ store: Store, userId: String) async throws {
+        let userDoc = db.collection("users").document(userId)
         
         isSyncing = true
         syncError = nil
         
         do {
-            print("💾 Saving store to Firestore...")
+            print("💾 Saving store to Firestore for user: \(userId)")
             print("  Transactions: \(store.transactions.count)")
             print("  Deleted IDs: \(store.deletedTransactionIds.count)")
             
@@ -87,10 +85,8 @@ class FirestoreManager: ObservableObject {
     
     // MARK: - Load Store from Firestore
     
-    func loadStore() async throws -> Store? {
-        guard let userDoc = userDocumentRef() else {
-            throw FirestoreError.notAuthenticated
-        }
+    func loadStore(userId: String) async throws -> Store? {
+        let userDoc = db.collection("users").document(userId)
         
         isSyncing = true
         syncError = nil
@@ -107,6 +103,7 @@ class FirestoreManager: ObservableObject {
             // تبدیل dictionary به Store
             let jsonData = try JSONSerialization.data(withJSONObject: storeData)
             let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
             let store = try decoder.decode(Store.self, from: jsonData)
             
             lastSyncDate = Date()
@@ -122,21 +119,24 @@ class FirestoreManager: ObservableObject {
     
     // MARK: - Sync (Smart Merge)
     
-    func syncStore(_ localStore: Store) async throws -> Store {
-        guard let userDoc = userDocumentRef() else {
-            throw FirestoreError.notAuthenticated
-        }
+    func syncStore(_ localStore: Store, userId: String) async throws -> Store {
+        let userDoc = db.collection("users").document(userId)
         
         isSyncing = true
         syncError = nil
         
         do {
+            print("🔄 Starting sync for user: \(userId)")
+            
+            // Test connection first
+            print("  Testing Firestore connection...")
             let snapshot = try await userDoc.getDocument()
+            print("  ✅ Connection successful")
             
             if !snapshot.exists {
                 // هیچ دیتایی در cloud نیست → آپلود local
                 print("☁️ No cloud data, uploading local")
-                try await saveStore(localStore)
+                try await saveStore(localStore, userId: userId)
                 lastSyncDate = Date()
                 isSyncing = false
                 return localStore
@@ -145,7 +145,7 @@ class FirestoreManager: ObservableObject {
             guard let cloudStoreData = snapshot.data()?["store"] as? [String: Any] else {
                 // دیتای cloud خراب → استفاده از local
                 print("⚠️ Invalid cloud data, uploading local")
-                try await saveStore(localStore)
+                try await saveStore(localStore, userId: userId)
                 lastSyncDate = Date()
                 isSyncing = false
                 return localStore
@@ -154,7 +154,10 @@ class FirestoreManager: ObservableObject {
             // تبدیل cloud data به Store
             let jsonData = try JSONSerialization.data(withJSONObject: cloudStoreData)
             let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
             let cloudStore = try decoder.decode(Store.self, from: jsonData)
+            
+            print("  Cloud store loaded: \(cloudStore.transactions.count) transactions")
             
             // Check if local has newer changes
             let hasLocalChanges = hasNewerChanges(local: localStore, cloud: cloudStore)
@@ -163,7 +166,7 @@ class FirestoreManager: ObservableObject {
                 print("✅ Local has newer changes, merging and uploading")
                 // Local دارای تغییرات جدیدتر → merge و آپلود
                 let mergedStore = mergeStores(local: localStore, cloud: cloudStore)
-                try await saveStore(mergedStore)
+                try await saveStore(mergedStore, userId: userId)
                 
                 lastSyncDate = Date()
                 isSyncing = false
@@ -175,9 +178,25 @@ class FirestoreManager: ObservableObject {
                 isSyncing = false
                 return cloudStore
             }
-        } catch {
+        } catch let error as NSError {
+            print("❌ Sync failed!")
+            print("  Error: \(error.localizedDescription)")
+            print("  Domain: \(error.domain)")
+            print("  Code: \(error.code)")
+            
             isSyncing = false
-            syncError = error.localizedDescription
+            
+            // User-friendly error messages
+            if error.code == 7 {
+                syncError = "Permission denied. Please check Firestore Rules in Firebase Console."
+            } else if error.code == 3 {
+                syncError = "Data too large. Please delete old transactions."
+            } else if error.domain == "NSURLErrorDomain" {
+                syncError = "Network error. Check your internet connection."
+            } else {
+                syncError = "\(error.localizedDescription) (Code: \(error.code))"
+            }
+            
             throw error
         }
     }

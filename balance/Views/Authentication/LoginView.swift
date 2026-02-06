@@ -6,6 +6,7 @@ struct LoginView: View {
     
     @State private var email = ""
     @State private var password = ""
+    @State private var showPassword = false
     @State private var showError = false
     @State private var showForgotPassword = false
     @State private var resetEmail = ""
@@ -20,7 +21,7 @@ struct LoginView: View {
                 
                 ScrollView {
                     VStack(spacing: 24) {
-                        Spacer().frame(height: 40)
+                        Spacer().frame(height: 20)
                         
                         // Logo & Title
                         VStack(spacing: 12) {
@@ -41,7 +42,7 @@ struct LoginView: View {
                                 .font(DS.Typography.title)
                                 .foregroundStyle(DS.Colors.text)
                         }
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 8)
                         
                         // Login Form
                         DS.Card {
@@ -69,9 +70,36 @@ struct LoginView: View {
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                     
-                                    SecureField("••••••••", text: $password)
-                                        .textFieldStyle(DS.TextFieldStyle())
+                                    HStack(spacing: 0) {
+                                        Group {
+                                            if showPassword {
+                                                TextField("••••••••", text: $password)
+                                            } else {
+                                                SecureField("••••••••", text: $password)
+                                            }
+                                        }
                                         .textContentType(.password)
+                                        .autocapitalization(.none)
+                                        
+                                        Button {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                                showPassword.toggle()
+                                            }
+                                        } label: {
+                                            Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                                .font(.system(size: 16))
+                                                .foregroundStyle(DS.Colors.subtext)
+                                                .frame(width: 44, height: 44)
+                                                .contentShape(Rectangle())
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(DS.Colors.grid, lineWidth: 1)
+                                    )
                                 }
                                 
                                 // Forgot Password

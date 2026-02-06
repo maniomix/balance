@@ -1,0 +1,292 @@
+/* --- Navigation & Tabs --- */
+"tab.dashboard" = "Panel";
+"tab.transactions" = "Transacciones";
+"tab.budget" = "Presupuesto";
+"tab.insights" = "Análisis";
+"tab.settings" = "Ajustes";
+
+/* --- Dashboard --- */
+"dashboard.title" = "Balance";
+"dashboard.data_for_month" = "Datos de este mes";
+"dashboard.start_from_zero" = "Empezar de cero";
+"dashboard.set_budget_first" = "Establece tu presupuesto mensual primero. El análisis comenzará de inmediato.";
+"dashboard.daily_trend" = "Tendencia de gasto diario";
+"dashboard.no_trend_data" = "Sin datos de tendencia. Añade algunas transacciones.";
+"dashboard.category_breakdown" = "Desglose por categorías";
+"dashboard.payment_breakdown" = "Desglose por pago";
+"dashboard.cash_vs_card" = "Efectivo vs. Tarjeta";
+"dashboard.no_payment_data" = "Sin datos de pago aún.";
+"dashboard.payment_insight_cash_heavy" = "Usas principalmente efectivo. Registra también gastos con tarjeta.";
+"dashboard.payment_insight_card_heavy" = "La mayoría de los gastos son con tarjeta. ¡Bien por el seguimiento!";
+"dashboard.payment_insight_balanced" = "Buen equilibrio entre efectivo y tarjeta.";
+"dashboard.category_breakdown_empty" = "Los totales aparecerán aquí al añadir transacciones.";
+"dashboard.advisor_insights" = "Consejos del asesor";
+"dashboard.honest_no_blame" = "Honesto, sin culpas";
+"dashboard.add_expenses" = "Añade gastos diarios para una evaluación más precisa.";
+"dashboard.quick_actions" = "Acciones recomendadas";
+"dashboard.no_action_needed" = "No se requieren acciones urgentes.";
+"dashboard.step1_title" = "Paso 1: Establecer presupuesto";
+"dashboard.step1_desc" = "Sin presupuesto, los números no tienen meta. Establece uno realista.";
+"dashboard.go_to_budget" = "Ir a Presupuesto";
+"dashboard.delete_month" = "Borrar datos del mes";
+"dashboard.delete_month_msg" = "Esto borrará permanentemente los datos del mes. No se puede deshacer.";
+"dashboard.delete_confirm" = "Borrar";
+"dashboard.month_cleared" = "Este mes ya ha sido vaciado.";
+"dashboard.month_deleted" = "Datos borrados con éxito";
+"dashboard.this_month" = "Este mes";
+
+/* --- Status & Analysis --- */
+"status.stable.title" = "Estable";
+"status.stable.detail" = "Gasto bajo control. Mantén el ritmo.";
+"status.needs_attention.title" = "Necesita atención";
+"status.needs_attention.detail" = "Cerca del límite. Revisa gastos discrecionales.";
+"status.budget_pressure.title" = "Presión presupuestaria";
+"status.budget_pressure.detail" = "Gasto muy alto. Reduce costes innecesarios.";
+"status.analysis_paused" = "Análisis pausado";
+"status.analysis_paused_desc" = "Se desbloqueará tras establecer un presupuesto.";
+"status.budget_set" = "Presupuesto fijado";
+"status.budget_set_desc" = "Ya puedes añadir transacciones y ver análisis reales.";
+
+/* --- KPIs --- */
+"kpi.spent" = "Gastado";
+"kpi.remaining" = "Restante";
+"kpi.daily_avg" = "Promedio diario";
+
+/* --- Budget --- */
+"budget.title" = "Presupuesto";
+"budget.set_monthly" = "Fijar presupuesto mensual";
+"budget.keep_realistic" = "Sé realista. Puedes ajustarlo cuando quieras.";
+"budget.start" = "Empezar";
+"budget.update" = "Actualizar";
+"budget.budget_used" = "Presupuesto usado";
+"budget.used_percent" = "usado";
+"budget.month_not_complete" = "Mes no completado";
+"budget.on_track" = "En camino";
+"budget.over_budget" = "Sobre presupuesto";
+"budget.saved_vs_prev" = "Ahorrado vs. mes anterior";
+"budget.total_saved" = "Ahorro total (meses pasados)";
+"budget.category_budgets" = "Presupuestos por categoría";
+"budget.category_caps_desc" = "Opcional: límites por categoría.";
+"budget.allocated" = "Asignado";
+"budget.unallocated" = "Sin asignar";
+"budget.caps_exceed" = "Límites exceden presupuesto total";
+"budget.caps_exceed_desc" = "Reduce presupuestos de categorías.";
+
+/* --- Transactions --- */
+"transactions.title" = "Transacciones";
+"transactions.set_budget_btn" = "Fijar presupuesto";
+"transactions.no_transactions" = "Sin transacciones este mes.";
+"transactions.start_simple" = "Empieza con un gasto simple. La constancia es clave.";
+"transactions.select" = "Seleccionar";
+"transactions.select_all" = "Seleccionar todo";
+"transactions.search_placeholder" = "Buscar categoría / nota";
+"transactions.delete_confirm" = "¿Borrar transacción?";
+"transactions.delete_multiple" = "¿Borrar %d transacciones?";
+"transactions.cannot_undo" = "No se puede deshacer.";
+"transactions.deleted" = "%d transacción borrada";
+"transactions.undo" = "Deshacer";
+"transactions.view_attachment" = "Ver adjunto";
+"transactions.edit" = "Editar";
+
+/* --- Add/Edit Transaction --- */
+"transaction.add" = "Añadir gasto";
+"transaction.edit" = "Editar gasto";
+"transaction.amount" = "Monto";
+"transaction.amount_placeholder" = "ej. 250.00";
+"transaction.category" = "Categoría";
+"transaction.add_category" = "Añadir";
+"transaction.new_category" = "Nueva categoría";
+"transaction.new_category_msg" = "Nombre de la categoría personalizada";
+"transaction.new_category_placeholder" = "ej. Café";
+"transaction.date" = "Fecha";
+"transaction.note" = "Nota (opcional)";
+"transaction.note_placeholder" = "ej. supermercado";
+"transaction.attachment" = "Adjunto (opcional)";
+"transaction.add_attachment" = "Añadir imagen o archivo";
+"transaction.attach_photo" = "Tomar foto";
+"transaction.attach_file" = "Elegir archivo";
+"transaction.save" = "Guardar";
+"transaction.save_changes" = "Guardar cambios";
+"transaction.close" = "Cerrar";
+"transaction.advisor_note" = "Nota: El registro preciso es el camino al control.";
+"transaction.payment_method" = "Método de pago";
+
+/* --- Filters --- */
+"filters.title" = "Filtros";
+"filters.categories" = "Categorías";
+"filters.all" = "Todas";
+"filters.clear" = "Limpiar";
+"filters.tip_one_category" = "Consejo: selecciona al menos una categoría.";
+"filters.date_range" = "Rango de fechas";
+"filters.from" = "Desde";
+"filters.to" = "Hasta";
+"filters.date_range_off" = "Apagado — mostrando todo el mes.";
+"filters.amount_range" = "Rango de monto";
+"filters.min" = "Min";
+"filters.max" = "Max";
+"filters.reset" = "Reiniciar";
+"filters.apply" = "Aplicar";
+
+/* --- Insights & AI --- */
+"insights.title" = "Análisis";
+"insights.not_ready" = "Análisis no listos";
+"insights.set_budget_first" = "Fija un presupuesto primero.";
+"insights.analytical_report" = "Informe analítico";
+"insights.trend_pressure" = "Esta tendencia presiona tu presupuesto";
+"insights.trend_pressure_desc" = "La proyección supera el presupuesto.";
+"insights.approaching_limit" = "Cerca del límite";
+"insights.approaching_limit_desc" = "Recorta gastos discrecionales.";
+"insights.projection_note" = "La proyección usa un promedio diario robusto.";
+"insights.no_data" = "Sin datos suficientes aún.";
+"insights.notifications" = "Notificaciones";
+"insights.export" = "Exportar";
+"insights.export_share" = "Compartir";
+"insights.ai_analysis" = "Análisis IA";
+"insights.ai_powered_cloud" = "Potenciado por la nube";
+"insights.ai_analyze_btn" = "Analizar este mes";
+"insights.ai_summary" = "Resumen";
+"insights.ai_recommended_actions" = "Acciones recomendadas";
+"insights.ai_risk_level" = "Nivel de riesgo";
+"insights.ai_analyzing" = "Analizando…";
+"insights.ai_last_analyzed" = "Último análisis: %@";
+
+/* --- Charts --- */
+"charts.title" = "Gráficos";
+"charts.spending_trend" = "Tendencia de gasto";
+"charts.category_pie" = "Desglose por categorías";
+"charts.income_expense" = "Ingresos vs. Gastos";
+"charts.monthly_comparison" = "Comparación mensual";
+"charts.last_3_months" = "Últimos 3 meses";
+"charts.last_6_months" = "Últimos 6 meses";
+"charts.this_year" = "Este año";
+"charts.no_data" = "Sin datos";
+
+/* --- Recurring --- */
+"recurring.title" = "Recurrentes";
+"recurring.empty" = "Sin transacciones recurrentes";
+"recurring.empty_desc" = "Añade gastos que se repiten.";
+"recurring.add" = "Añadir recurrente";
+"recurring.edit" = "Editar recurrente";
+"recurring.active" = "Activo";
+"recurring.next_occurrence" = "Próxima ocurrencia";
+"recurring.auto_generated" = "Autogenerado";
+"recurring.frequency" = "Frecuencia";
+"recurring.start_date" = "Fecha inicio";
+"recurring.end_date" = "Fecha fin";
+
+/* --- Import --- */
+"import.title" = "Importar";
+"import.from_csv" = "Importar desde CSV";
+"import.csv_columns" = "Columnas CSV recomendadas:";
+"import.csv_format" = "fecha, monto, categoría, nota";
+"import.duplicate_note" = "Nota: Se saltarán los duplicados.";
+"import.choose_file" = "Elegir archivo CSV";
+"import.xlsx_tip" = "Consejo: Exporta archivos Excel a CSV primero.";
+"import.columns" = "Columnas";
+"import.header_row" = "Fila de encabezado";
+"import.preview" = "Vista previa";
+"import.import_btn" = "Importar a Balance";
+"import.mode_title" = "Modo de importación";
+"import.mode_message" = "¿Fusionar (Merge) o reemplazar (Replace)?";
+"import.mode_merge" = "Fusionar";
+"import.mode_replace" = "Reemplazar";
+"import.done" = "Hecho";
+
+/* --- Settings --- */
+"settings.title" = "Ajustes";
+"settings.app_settings" = "Ajustes de App";
+"settings.currency" = "Moneda";
+"settings.language" = "Idioma";
+"settings.language_note" = "Nota: Los cambios se aplican de inmediato.";
+"settings.biometrics" = "Face ID / Touch ID";
+"settings.biometrics_desc" = "Protege datos con biometría.";
+"settings.developer" = "Desarrollador";
+"settings.version" = "Versión";
+"settings.about" = "Sobre Balance";
+"settings.privacy_first" = "Privacidad primero - datos locales";
+
+/* --- Authentication --- */
+"auth.welcome" = "Bienvenido";
+"auth.signin_to_account" = "Inicia sesión";
+"auth.create_account" = "Crea tu cuenta";
+"auth.get_started" = "Empieza con Balance";
+"auth.email" = "Email";
+"auth.password" = "Contraseña";
+"auth.confirm_password" = "Confirmar contraseña";
+"auth.forgot_password" = "¿Olvidaste tu contraseña?";
+"auth.signin" = "Entrar";
+"auth.signup" = "Registrarse";
+"auth.dont_have_account" = "¿No tienes cuenta?";
+"auth.already_have_account" = "¿Ya tienes cuenta?";
+"auth.reset_password" = "Restablecer contraseña";
+"auth.reset_msg" = "Ingresa tu email para el enlace.";
+"auth.send_reset_link" = "Enviar enlace";
+"auth.reset_link_sent" = "Enlace enviado";
+"auth.reset_link_msg" = "Revisa tu email.";
+"auth.signing_in" = "Entrando...";
+"auth.creating_account" = "Creando cuenta...";
+"auth.biometric_reason" = "Entrar a Balance";
+"auth.password_strength" = "Fuerza de contraseña:";
+"auth.min_characters" = "Mínimo 6 caracteres";
+"auth.passwords_match" = "Las contraseñas coinciden";
+
+/* --- Premium --- */
+"premium.title" = "Balance Premium";
+"premium.subtitle" = "Control financiero total";
+"premium.feature.charts" = "Gráficos analíticos avanzados";
+"premium.feature.cloud" = "Sincronización en la nube";
+"premium.feature.recurring" = "Recurrentes ilimitados";
+"premium.feature.export" = "Exportación PDF y Excel";
+"premium.feature.ai" = "Análisis de gastos con IA";
+"premium.subscribe.monthly" = "Plan Mensual";
+"premium.subscribe.yearly" = "Plan Anual (Ahorra 20%)";
+"premium.restore" = "Restaurar compras";
+"premium.active_status" = "Premium activo";
+"premium.upgrade_now" = "Mejorar ahora - %@";
+
+/* --- Categories --- */
+"category.groceries" = "Supermercado";
+"category.rent" = "Alquiler";
+"category.bills" = "Facturas";
+"category.transport" = "Transporte";
+"category.health" = "Salud";
+"category.education" = "Educación";
+"category.dining" = "Restaurante";
+"category.shopping" = "Compras";
+"category.entertainment" = "Entretenimiento";
+"category.other" = "Otros";
+
+/* --- Onboarding --- */
+"onboarding.track_title" = "Rastrea tus gastos";
+"onboarding.track_desc" = "Monitorea tus finanzas con facilidad.";
+"onboarding.budget_title" = "Fija presupuestos";
+"onboarding.budget_desc" = "Crea presupuestos y ahorra más.";
+"onboarding.insights_title" = "Visualiza análisis";
+"onboarding.insights_desc" = "Obtén detalles de tus hábitos.";
+"onboarding.sync_title" = "Sincroniza todo";
+"onboarding.sync_desc" = "Datos sincronizados automáticamente.";
+"onboarding.skip" = "Saltar";
+"onboarding.next" = "Siguiente";
+"onboarding.get_started" = "Empezar";
+
+/* --- Common --- */
+"common.ok" = "OK";
+"common.done" = "Hecho";
+"common.yes" = "Sí";
+"common.no" = "No";
+"common.save" = "Guardar";
+"common.cancel" = "Cancelar";
+"common.delete" = "Borrar";
+"common.edit" = "Editar";
+"common.add" = "Añadir";
+"common.close" = "Cerrar";
+"common.error" = "Error";
+"common.success" = "Éxito";
+"common.loading" = "Cargando...";
+"common.trash" = "Papelera";
+"common.select" = "Seleccionar";
+"common.select_all" = "Seleccionar todo";
+"common.undo" = "Deshacer";
+"common.search" = "Buscar";
+"common.reset" = "Reiniciar";
+"common.apply" = "Aplicar";
