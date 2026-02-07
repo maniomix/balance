@@ -10,1099 +10,7 @@ import FirebaseAuth
 
 
 
-// MARK: - Localization
 
-// MARK: - Localization
-
-enum L10n {
-    static var current: String {
-        UserDefaults.standard.string(forKey: "app.language") ?? "en"
-    }
-    
-    static func t(_ key: String) -> String {
-        translations[current]?[key] ?? translations["en"]?[key] ?? key
-    }
-    
-    private static let translations: [String: [String: String]] = [
-        "en": [
-            // Tabs
-            "tab.dashboard": "Dashboard",
-            "tab.transactions": "Transactions",
-            "tab.budget": "Budget",
-            "tab.insights": "Insights",
-            "tab.settings": "Settings",
-            
-            // Dashboard
-            "dashboard.title": "Balance",
-            "dashboard.data_for_month": "Data For this Month",
-            "dashboard.start_from_zero": "Start from zero",
-            "dashboard.set_budget_first": "Set your monthly budget first. Analysis will start immediately.",
-            "dashboard.daily_trend": "Daily spending trend",
-            "dashboard.no_trend_data": "No trend data yet. Add a few transactions.",
-            "dashboard.category_breakdown": "Category breakdown",
-            "dashboard.payment_breakdown": "Payment breakdown",
-            "dashboard.cash_vs_card": "Cash vs Card",
-            "dashboard.no_payment_data": "No payment data yet. Add transactions to see breakdown.",
-            "dashboard.payment_insight_cash_heavy": "You047re using mostly cash. Consider tracking card expenses too.",
-            "dashboard.payment_insight_card_heavy": "Most expenses are on card. Good for tracking!",
-            "dashboard.payment_insight_balanced": "Nice balance between cash and card payments.",
-            "dashboard.category_breakdown_empty": "Once you add transactions, category totals will appear here.",
-            "dashboard.advisor_insights": "Advisor insights",
-            "dashboard.honest_no_blame": "Honest, no blame",
-            "dashboard.add_expenses": "Add a few everyday expenses for a more accurate assessment.",
-            "dashboard.quick_actions": "Quick recommended actions",
-            "dashboard.no_action_needed": "No urgent action needed. Stay consistent.",
-            "dashboard.step1_title": "Step 1: Set your monthly budget",
-            "dashboard.step1_desc": "Without a budget, the numbers have no target. Set a realistic budget—then we take control step by step.",
-            "dashboard.go_to_budget": "Go to Budget",
-            "dashboard.delete_month": "Delete Month Data",
-            "dashboard.delete_month_msg": "This will permanently delete all transactions and data for this month. This action cannot be undone.",
-            "dashboard.delete_confirm": "Delete",
-            "dashboard.month_cleared": "This month has already been cleared. There is nothing left to delete.",
-            "dashboard.month_deleted": "This month's data has been successfully deleted",
-            "dashboard.this_month": "This month",
-            
-            // Month Picker
-            "month.this_month": "This month",
-            
-            // Budget Status
-            "status.stable": "status.stable",
-            "status.stable_desc": "Spending is under control. Keep the pattern.",
-            "status.needs_attention": "status.needs_attention",
-            "status.needs_attention_desc": "You're approaching the budget limit. Review discretionary spending.",
-            "status.budget_pressure": "status.budget_pressure",
-            "status.budget_pressure_desc": "Spending is very high. Reduce non‑essential costs.",
-            "status.analysis_paused": "Analysis paused",
-            "status.analysis_paused_desc": "Dashboard and insights unlock after you set a budget.",
-            "status.budget_set": "Budget set",
-            "status.budget_set_desc": "You can now add transactions and get real analysis.",
-            
-            // KPIs
-            "kpi.spent": "Spent",
-            "kpi.remaining": "Remaining",
-            "kpi.daily_avg": "Daily avg",
-            
-            // Budget
-            "budget.title": "Budget",
-            "budget.set_monthly": "Set a monthly budget",
-            "budget.keep_realistic": "Keep it realistic. You can adjust it anytime.",
-            "budget.start": "Start",
-            "budget.update": "Update",
-            "budget.this_month": "This month",
-            "budget.budget_used": "Budget used",
-            "budget.used_percent": "used",
-            "budget.spent": "Spent",
-            "budget.remaining": "Remaining",
-            "budget.month_not_complete": "Month not complete yet",
-            "budget.on_track": "On track",
-            "budget.over_budget": "Over budget",
-            "budget.saved_vs_prev": "Saved vs previous month",
-            "budget.total_saved": "Total saved (past months)",
-            "budget.category_budgets": "Category budgets",
-            "budget.category_caps_desc": "Optional: set caps per category. Leave empty for no cap.",
-            "budget.allocated": "Allocated",
-            "budget.unallocated": "Unallocated",
-            "budget.caps_exceed": "Category caps exceed total budget",
-            "budget.caps_exceed_desc": "Reduce one or more category budgets so allocation stays within the monthly total.",
-            
-            // Transactions
-            "transactions.title": "Transactions",
-            "transactions.set_budget_btn": "Set budget",
-            "transactions.no_transactions": "No transactions this month.",
-            "transactions.start_simple": "Start with a simple expense. Consistency beats perfection.",
-            "transactions.select": "Select",
-            "transactions.select_all": "Select All",
-            "transactions.delete": "Delete",
-            "transactions.cancel": "Cancel",
-            "transactions.search_placeholder": "Search category / note",
-            "transactions.delete_confirm": "transactions.delete_confirm",
-            "transactions.delete_multiple": "Delete %d transactions?",
-            "transactions.cannot_undo": "transactions.cannot_undo",
-            "transactions.deleted": "%d transaction deleted",
-            "transactions.undo": "Undo",
-            "transactions.view_attachment": "View attachment",
-            "transactions.edit": "Edit",
-            
-            // Add/Edit Transaction
-            "transaction.add": "Add expense",
-            "transaction.edit": "Edit expense",
-            "transaction.amount": "Amount",
-            "transaction.amount_placeholder": "e.g. 250.00",
-            "transaction.category": "Category",
-            "transaction.add_category": "Add",
-            "transaction.new_category": "New Category",
-            "transaction.new_category_msg": "Enter a name for your custom category",
-            "transaction.new_category_placeholder": "e.g. Coffee",
-            "transaction.date": "Date",
-            "transaction.note": "Note (optional)",
-            "transaction.note_placeholder": "e.g. groceries",
-            "transaction.attachment": "Attachment (optional)",
-            "transaction.add_attachment": "Add image or file",
-            "transaction.attach_photo": "Take Photo",
-            "transaction.attach_file": "Choose File",
-            "transaction.save": "Save",
-            "transaction.save_changes": "Save changes",
-            "transaction.close": "Close",
-            "transaction.advisor_note": "Advisor note: accurate tracking is the fastest path to control.",
-            "transaction.payment_method": "Payment Method",
-            
-            // Filters
-            "filters.title": "Filters",
-            "filters.categories": "Categories",
-            "filters.all": "All",
-            "filters.clear": "Clear",
-            "filters.tip_one_category": "Tip: select at least one category.",
-            "filters.date_range": "Date range",
-            "filters.from": "From",
-            "filters.to": "To",
-            "filters.date_range_off": "Off — showing all dates in the selected month.",
-            "filters.amount_range": "Amount range",
-            "filters.min": "Min (€)",
-            "filters.max": "Max (€)",
-            "filters.amount_example": "Amounts are in EUR. Example: 12.50",
-            "filters.reset": "Reset",
-            "filters.apply": "Apply",
-            "filters.close": "Close",
-            
-            // Import
-            "import.title": "Import",
-            "import.from_csv": "Import transactions from CSV",
-            "import.csv_columns": "Recommended CSV columns (header row preferred):",
-            "import.csv_format": "date (required), amount (required, EUR), category (required), note (optional)",
-            "import.duplicate_note": "Note: If you import the same CSV again, Balance will only add transactions that aren't already in the app (duplicates are skipped).",
-            "import.choose_file": "Choose CSV file",
-            "import.xlsx_tip": "Tip: If your file is .xlsx, export it as CSV in Excel, then import here.",
-            "import.columns": "Columns",
-            "import.header_row": "Header row",
-            "import.preview": "Preview",
-            "import.import_btn": "Import into Balance",
-            "import.mode_title": "Import Mode",
-            "import.mode_message": "You have %d existing transaction(s). Do you want to keep them and add the imported data (Merge), or delete them and keep only the imported data (Replace)?",
-            "import.mode_merge": "Merge",
-            "import.mode_replace": "Replace",
-            "import.done": "Done",
-            
-            // Insights
-            "insights.title": "Insights",
-            "insights.not_ready": "Insights are not ready",
-            "insights.set_budget_first": "Set your monthly budget first to unlock analysis.",
-            "insights.analytical_report": "Analytical report",
-            "insights.trend_pressure": "This trend will pressure your budget",
-            "insights.trend_pressure_desc": "End-of-month projection is above budget. Prioritize cutting discretionary costs.",
-            "insights.approaching_limit": "Approaching the limit",
-            "insights.approaching_limit_desc": "To stay in control, trim one discretionary category slightly.",
-            "insights.projection_note": "Projection uses a robust daily average (reduces the impact of one unusual day). New transactions refine the estimate.",
-            "insights.insights_title": "Insights",
-            "insights.no_data": "Not enough data yet. Add a few transactions.",
-            "insights.notifications": "Notifications",
-            "insights.notifications_desc": "Get reminders to review your budget and spending.",
-            "insights.notification_status": "Notification status",
-            "insights.send_test": "Send test notification",
-            "insights.test_tip": "Tip: turn notifications on, then tap the test button.",
-            "insights.export": "Export",
-            "insights.export_share": "Share",
-            "insights.export_desc": "Export your month as Excel, CSV, or PDF report.",
-            "insights.export_excel": "Excel",
-            "insights.export_csv": "CSV",
-            "insights.export_pdf": "PDF Report",
-            "insights.export_tip": "Tip: Excel export includes multiple sheets (Summary, Transactions, Categories, Daily).",
-            "insights.ai_analysis": "AI analysis",
-            "insights.ai_powered": "Powered by cloud",
-            "insights.ai_desc": "Get a smarter explanation of what drove your spending and what to do next.",
-            "insights.ai_analyze": "Analyze this month",
-            
-            // AI Insights
-            "ai.title": "AI insights",
-            "ai.close": "Close",
-            "ai.tip": "Tip: AI-generated insights based on your spending data. Results may be imperfect — use as guidance.",
-            "ai.analyzing": "Analyzing…",
-            "ai.run_analysis": "Run analysis",
-            "ai.reanalyze": "Re-analyze",
-            "ai.last_analyzed": "Last analyzed: %@",
-            "ai.summary": "Summary",
-            "ai.insights": "Insights",
-            "ai.actions": "Recommended actions",
-            "ai.risk": "Risk",
-            "ai.risk_level": "Risk level",
-            "ai.error": "Couldn't analyze",
-            
-            // Settings
-            "settings.title": "Settings",
-            "settings.legal": "Legal & Support",
-            "settings.support_email": "Support Email",
-            "settings.report_bug": "Report Bug",
-            "settings.licenses": "Licenses",
-            "settings.app_settings": "App Settings",
-            "settings.currency": "Currency",
-            "settings.language": "Language",
-            "settings.language_note": "Note: Language change will take effect immediately.",
-            "settings.developer": "Developer",
-            "settings.developed_by": "Developed by",
-            "settings.version": "Version",
-            "settings.build": "Build",
-            "settings.about": "About Balance",
-            "settings.about_desc": "Balance is a personal finance app designed to help you control your spending, step by step. Track expenses, set budgets, and gain insights into your financial habits.",
-            "settings.feature_privacy": "Privacy first - all data stored locally",
-            "settings.feature_insights": "Smart insights and projections",
-            "settings.feature_ai": "AI-powered analysis",
-            "settings.feature_import": "Import & export transactions",
-            
-            // Categories
-            "category.groceries": "Groceries",
-            "category.rent": "Rent",
-            "category.bills": "Bills",
-            "category.transport": "Transport",
-            "category.health": "Health",
-            "category.education": "Education",
-            "category.dining": "Dining",
-            "category.shopping": "Shopping",
-            "category.entertainment": "Entertainment",
-            "category.other": "Other",
-            
-            // Payment Methods
-            "payment.cash": "Cash",
-            "payment.card": "Card",
-            
-            // Common
-            "common.ok": "OK",
-            "common.done": "Done",
-            "common.yes": "Yes",
-            "common.no": "No",
-            "common.close": "Close",
-            "common.cancel": "Cancel",
-            "common.delete": "Delete",
-            "common.save": "Save",
-            "common.edit": "Edit",
-            "common.add": "Add",
-            "common.trash": "Trash",
-            
-            // Recurring Transactions
-            "recurring.title": "Recurring Transactions",
-            "recurring.empty": "No recurring transactions yet",
-            "recurring.empty_desc": "Add recurring transactions like salary, rent, or subscriptions",
-            "recurring.add": "Add Recurring",
-            "recurring.edit": "Edit Recurring",
-            "recurring.daily": "Daily",
-            "recurring.weekly": "Weekly",
-            "recurring.monthly": "Monthly",
-            "recurring.yearly": "Yearly",
-            "recurring.frequency": "Frequency",
-            "recurring.start_date": "Start Date",
-            "recurring.end_date": "End Date (Optional)",
-            "recurring.next_occurrence": "Next",
-            "recurring.active": "Active",
-            "recurring.inactive": "Inactive",
-            "recurring.auto_generated": "Auto-generated",
-            
-            // Goals
-            "goals.title": "Goals & Savings",
-            "goals.empty": "No goals yet",
-            "goals.empty_desc": "Set goals to track your savings progress",
-            "goals.add": "Add Goal",
-            "goals.edit": "Edit Goal",
-            "goals.name": "Goal Name",
-            "goals.target": "Target Amount",
-            "goals.current": "Current Amount",
-            "goals.deadline": "Deadline (Optional)",
-            "goals.category": "Category",
-            "goals.emoji": "Emoji",
-            "goals.color": "Color",
-            "goals.progress": "Progress",
-            "goals.remaining": "Remaining",
-            "goals.completed": "Completed",
-            "goals.overdue": "Overdue",
-            "goals.days_left": "days left",
-            "goals.add_funds": "Add Funds",
-            "goal.savings": "Savings",
-            "goal.purchase": "Purchase",
-            "goal.travel": "Travel",
-            "goal.education": "Education",
-            "goal.emergency": "Emergency Fund",
-            "goal.other": "Other",
-            
-            // Charts
-            "charts.title": "Advanced Charts",
-            "charts.spending_trend": "Spending Trend",
-            "charts.category_pie": "Category Distribution",
-            "charts.income_expense": "Income vs Expense",
-            "charts.monthly_comparison": "Monthly Comparison",
-            "charts.last_3_months": "Last 3 Months",
-            "charts.last_6_months": "Last 6 Months",
-            "charts.this_year": "This Year",
-            "charts.average": "Average",
-        ],
-        
-        "de": [
-            // Tabs
-            "tab.dashboard": "Übersicht",
-            "tab.transactions": "Transaktionen",
-            "tab.budget": "Budget",
-            "tab.insights": "Einblicke",
-            "tab.settings": "Einstellungen",
-            
-            // Dashboard
-            "dashboard.title": "Balance",
-            "dashboard.data_for_month": "Daten für diesen Monat",
-            "dashboard.start_from_zero": "Bei Null beginnen",
-            "dashboard.set_budget_first": "Legen Sie zuerst Ihr monatliches Budget fest. Die Analyse beginnt sofort.",
-            "dashboard.daily_trend": "Täglicher Ausgabentrend",
-            "dashboard.no_trend_data": "Noch keine Trenddaten. Fügen Sie ein paar Transaktionen hinzu.",
-            "dashboard.category_breakdown": "Kategorienaufschlüsselung",
-            "dashboard.payment_breakdown": "Zahlungsaufschlüsselung",
-            "dashboard.cash_vs_card": "Bargeld vs. Karte",
-            "dashboard.no_payment_data": "Noch keine Zahlungsdaten. Fügen Sie Transaktionen hinzu, um die Aufschlüsselung zu sehen.",
-            "dashboard.payment_insight_cash_heavy": "Sie verwenden hauptsächlich Bargeld. Erwägen Sie, auch Kartenausgaben zu verfolgen.",
-            "dashboard.payment_insight_card_heavy": "Die meisten Ausgaben erfolgen per Karte. Gut zum Verfolgen!",
-            "dashboard.payment_insight_balanced": "Schönes Gleichgewicht zwischen Bar- und Kartenzahlungen.",
-            "dashboard.category_breakdown_empty": "Sobald Sie Transaktionen hinzufügen, werden hier Kategoriensummen angezeigt.",
-            "dashboard.advisor_insights": "Berater-Einblicke",
-            "dashboard.honest_no_blame": "Ehrlich, ohne Vorwürfe",
-            "dashboard.add_expenses": "Fügen Sie ein paar alltägliche Ausgaben für eine genauere Bewertung hinzu.",
-            "dashboard.quick_actions": "Schnelle empfohlene Aktionen",
-            "dashboard.no_action_needed": "Keine dringende Aktion erforderlich. Bleiben Sie konsequent.",
-            "dashboard.step1_title": "Schritt 1: Legen Sie Ihr monatliches Budget fest",
-            "dashboard.step1_desc": "Ohne Budget haben die Zahlen kein Ziel. Legen Sie ein realistisches Budget fest – dann übernehmen wir Schritt für Schritt die Kontrolle.",
-            "dashboard.go_to_budget": "Zum Budget gehen",
-            "dashboard.delete_month": "Daten dieses Monats löschen?",
-            "dashboard.delete_month_msg": "Alle Transaktionen, das monatliche Budget und die Kategorienlimits für diesen Monat werden dauerhaft gelöscht.",
-            "dashboard.delete_confirm": "Löschen",
-            "dashboard.month_cleared": "Dieser Monat wurde bereits gelöscht. Es gibt nichts mehr zu löschen.",
-            "dashboard.month_deleted": "Die Daten dieses Monats wurden erfolgreich gelöscht",
-            "dashboard.this_month": "Dieser Monat",
-            
-            // Month Picker
-            "month.this_month": "Dieser Monat",
-            
-            // Budget Status
-            "status.stable": "Stabil",
-            "status.stable_desc": "Die Ausgaben sind unter Kontrolle. Behalten Sie das Muster bei.",
-            "status.needs_attention": "Erfordert Aufmerksamkeit",
-            "status.needs_attention_desc": "Sie nähern sich dem Budgetlimit. Überprüfen Sie diskretionäre Ausgaben.",
-            "status.budget_pressure": "Budgetdruck",
-            "status.budget_pressure_desc": "Die Ausgaben sind sehr hoch. Reduzieren Sie nicht-essentielle Kosten.",
-            "status.analysis_paused": "Analyse pausiert",
-            "status.analysis_paused_desc": "Dashboard und Einblicke werden freigeschaltet, nachdem Sie ein Budget festgelegt haben.",
-            "status.budget_set": "Budget festgelegt",
-            "status.budget_set_desc": "Sie können jetzt Transaktionen hinzufügen und echte Analysen erhalten.",
-            
-            // KPIs
-            "kpi.spent": "Ausgegeben",
-            "kpi.remaining": "Verbleibend",
-            "kpi.daily_avg": "Tagesd. Ø",
-            
-            // Budget
-            "budget.title": "Budget",
-            "budget.set_monthly": "Monatliches Budget festlegen",
-            "budget.keep_realistic": "Bleiben Sie realistisch. Sie können es jederzeit anpassen.",
-            "budget.start": "Start",
-            "budget.update": "Aktualisieren",
-            "budget.this_month": "Dieser Monat",
-            "budget.budget_used": "Budget verwendet",
-            "budget.used_percent": "verwendet",
-            "budget.spent": "Ausgegeben",
-            "budget.remaining": "Verbleibend",
-            "budget.month_not_complete": "Monat noch nicht abgeschlossen",
-            "budget.on_track": "Auf Kurs",
-            "budget.over_budget": "Über Budget",
-            "budget.saved_vs_prev": "Gespart ggü. Vormonat",
-            "budget.total_saved": "Gesamt gespart (vergangene Monate)",
-            "budget.category_budgets": "Kategorienbudgets",
-            "budget.category_caps_desc": "Optional: Legen Sie Obergrenzen pro Kategorie fest. Leer lassen für keine Obergrenze.",
-            "budget.allocated": "Zugewiesen",
-            "budget.unallocated": "Nicht zugewiesen",
-            "budget.caps_exceed": "Kategoriengrenzen überschreiten Gesamtbudget",
-            "budget.caps_exceed_desc": "Reduzieren Sie ein oder mehrere Kategorienbudgets, damit die Zuteilung innerhalb der monatlichen Summe bleibt.",
-            
-            // Transactions
-            "transactions.title": "Transaktionen",
-            "transactions.start_simple": "Beginnen Sie mit einer einfachen Ausgabe. Beständigkeit schlägt Perfektion.",
-            "transactions.select": "Auswählen",
-            "transactions.select_all": "Alle auswählen",
-            "transactions.delete": "Löschen",
-            "transactions.cancel": "Abbrechen",
-            "transactions.search_placeholder": "Kategorie / Notiz suchen",
-            "transactions.delete_confirm": "Transaktion löschen?",
-            "transactions.delete_multiple": "%d Transaktionen löschen?",
-            "transactions.cannot_undo": "Diese Aktion kann nicht rückgängig gemacht werden.",
-            "transactions.deleted": "%d Transaktion gelöscht",
-            "transactions.undo": "Rückgängig",
-            "transactions.view_attachment": "Anhang ansehen",
-            "transactions.edit": "Bearbeiten",
-            
-            // Add/Edit Transaction
-            "transaction.add": "Ausgabe hinzufügen",
-            "transaction.edit": "Ausgabe bearbeiten",
-            "transaction.amount": "Betrag",
-            "transaction.amount_placeholder": "z.B. 250.00",
-            "transaction.category": "Kategorie",
-            "transaction.add_category": "Hinzufügen",
-            "transaction.new_category": "Neue Kategorie",
-            "transaction.new_category_msg": "Erstellen Sie eine benutzerdefinierte Kategorie für Ihre Transaktionen.",
-            "transaction.new_category_placeholder": "z.B. Kaffee",
-            "transaction.date": "Datum",
-            "transaction.note": "Notiz (optional)",
-            "transaction.note_placeholder": "z.B. Lebensmittel",
-            "transaction.attachment": "Anhang (optional)",
-            "transaction.add_attachment": "Bild oder Datei hinzufügen",
-            "transaction.attach_photo": "Fotobibliothek",
-            "transaction.attach_file": "Dateien",
-            "transaction.save": "Speichern",
-            "transaction.save_changes": "Änderungen speichern",
-            "transaction.close": "Schließen",
-            "transaction.advisor_note": "Beraterhinweis: Genaue Verfolgung ist der schnellste Weg zur Kontrolle.",
-            "transaction.payment_method": "Zahlungsmethode",
-            
-            // Filters
-            "filters.title": "Filter",
-            "filters.categories": "Kategorien",
-            "filters.all": "Alle",
-            "filters.clear": "Löschen",
-            "filters.tip_one_category": "Tipp: Wählen Sie mindestens eine Kategorie aus.",
-            "filters.date_range": "Datumsbereich",
-            "filters.from": "Von",
-            "filters.to": "Bis",
-            "filters.date_range_off": "Aus — zeigt alle Daten im ausgewählten Monat.",
-            "filters.amount_range": "Betragsbereich",
-            "filters.min": "Min (€)",
-            "filters.max": "Max (€)",
-            "filters.amount_example": "Beträge sind in EUR. Beispiel: 12.50",
-            "filters.reset": "Zurücksetzen",
-            "filters.apply": "Anwenden",
-            "filters.close": "Schließen",
-            
-            // Import
-            "import.title": "Import",
-            "import.from_csv": "Transaktionen aus CSV importieren",
-            "import.csv_columns": "Empfohlene CSV-Spalten (Kopfzeile bevorzugt):",
-            "import.csv_format": "Datum (erforderlich), Betrag (erforderlich, EUR), Kategorie (erforderlich), Notiz (optional)",
-            "import.duplicate_note": "Hinweis: Wenn Sie dieselbe CSV erneut importieren, fügt Balance nur Transaktionen hinzu, die noch nicht in der App sind (Duplikate werden übersprungen).",
-            "import.choose_file": "CSV-Datei auswählen",
-            "import.xlsx_tip": "Tipp: Wenn Ihre Datei .xlsx ist, exportieren Sie sie als CSV in Excel und importieren Sie sie dann hier.",
-            "import.columns": "Spalten",
-            "import.header_row": "Kopfzeile",
-            "import.preview": "Vorschau",
-            "import.import_btn": "In Balance importieren",
-            "import.mode_title": "Importmodus",
-            "import.mode_message": "Sie haben %d bestehende Transaktion(en). Möchten Sie diese behalten und die importierten Daten hinzufügen (Zusammenführen) oder sie löschen und nur die importierten Daten behalten (Ersetzen)?",
-            "import.mode_merge": "Zusammenführen",
-            "import.mode_replace": "Ersetzen",
-            "import.done": "Fertig",
-            
-            // Insights
-            "insights.title": "Einblicke",
-            "insights.not_ready": "Einblicke sind nicht bereit",
-            "insights.set_budget_first": "Legen Sie zuerst Ihr monatliches Budget fest, um die Analyse freizuschalten.",
-            "insights.analytical_report": "Analysebericht",
-            "insights.trend_pressure": "Dieser Trend wird Ihr Budget belasten",
-            "insights.trend_pressure_desc": "Die Prognose für das Monatsende liegt über dem Budget. Priorisieren Sie die Kürzung diskretionärer Kosten.",
-            "insights.approaching_limit": "Annäherung an das Limit",
-            "insights.approaching_limit_desc": "Um die Kontrolle zu behalten, kürzen Sie eine diskretionäre Kategorie leicht.",
-            "insights.projection_note": "Die Projektion verwendet einen robusten Tagesdurchschnitt (reduziert die Auswirkungen eines ungewöhnlichen Tages). Neue Transaktionen verfeinern die Schätzung.",
-            "insights.insights_title": "Einblicke",
-            "insights.no_data": "Noch nicht genug Daten. Fügen Sie ein paar Transaktionen hinzu.",
-            "insights.notifications": "Benachrichtigungen",
-            "insights.notifications_desc": "Erhalten Sie Erinnerungen, um Ihr Budget und Ihre Ausgaben zu überprüfen.",
-            "insights.notification_status": "Benachrichtigungsstatus",
-            "insights.send_test": "Testbenachrichtigung senden",
-            "insights.test_tip": "Tipp: Aktivieren Sie Benachrichtigungen und tippen Sie dann auf die Testschaltfläche.",
-            "insights.export": "Export",
-            "insights.export_share": "Teilen",
-            "insights.export_desc": "Exportieren Sie Ihren Monat als saubere Tabelle für Excel oder als CSV.",
-            "insights.export_excel": "Excel",
-            "insights.export_csv": "CSV",
-            "insights.export_tip": "Tipp: Excel-Export enthält mehrere Blätter (Zusammenfassung, Transaktionen, Kategorien, Täglich).",
-            "insights.ai_analysis": "KI-Analyse",
-            "insights.ai_powered": "Cloud-basiert",
-            "insights.ai_desc": "Erhalten Sie eine intelligentere Erklärung darüber, was Ihre Ausgaben verursacht hat und was als nächstes zu tun ist.",
-            "insights.ai_analyze": "Diesen Monat analysieren",
-            
-            // AI Insights
-            "ai.title": "KI-Einblicke",
-            "ai.close": "Schließen",
-            "ai.tip": "Tipp: KI-generierte Einblicke basierend auf Ihren Ausgabendaten. Ergebnisse können unvollkommen sein – nutzen Sie sie als Orientierung.",
-            "ai.analyzing": "Analysieren…",
-            "ai.run_analysis": "Analyse ausführen",
-            "ai.reanalyze": "Erneut analysieren",
-            "ai.last_analyzed": "Zuletzt analysiert: %@",
-            "ai.summary": "Zusammenfassung",
-            "ai.insights": "Einblicke",
-            "ai.actions": "Empfohlene Aktionen",
-            "ai.risk": "Risiko",
-            "ai.risk_level": "Risikoniveau",
-            "ai.error": "Konnte nicht analysieren",
-            
-            // Settings
-            "settings.title": "Einstellungen",
-            "settings.app_settings": "App-Einstellungen",
-            "settings.currency": "Währung",
-            "settings.language": "Sprache",
-            "settings.language_note": "Hinweis: Sprachänderung wird sofort wirksam.",
-            "settings.developer": "Entwickler",
-            "settings.developed_by": "Entwickelt von",
-            "settings.version": "Version",
-            "settings.build": "Build",
-            "settings.about": "Über Balance",
-            "settings.about_desc": "Balance ist eine persönliche Finanz-App, die Ihnen hilft, Ihre Ausgaben Schritt für Schritt zu kontrollieren. Verfolgen Sie Ausgaben, legen Sie Budgets fest und gewinnen Sie Einblicke in Ihre finanziellen Gewohnheiten.",
-            "settings.feature_privacy": "Datenschutz zuerst - alle Daten lokal gespeichert",
-            "settings.feature_insights": "Intelligente Einblicke und Prognosen",
-            "settings.feature_ai": "KI-gestützte Analyse",
-            "settings.feature_import": "Transaktionen importieren und exportieren",
-            
-            // Categories
-            "category.groceries": "Lebensmittel",
-            "category.rent": "Miete",
-            "category.bills": "Rechnungen",
-            "category.transport": "Transport",
-            "category.health": "Gesundheit",
-            "category.education": "Bildung",
-            "category.dining": "Gastronomie",
-            "category.shopping": "Einkaufen",
-            "category.entertainment": "Unterhaltung",
-            "category.other": "Sonstiges",
-            
-            // Common
-            "common.ok": "common.ok",
-            "common.done": "Fertig",
-            "common.yes": "Ja",
-            "common.no": "Nein",
-            "common.close": "Schließen",
-            "common.cancel": "Abbrechen",
-            "common.delete": "Löschen",
-            "common.save": "Speichern",
-            "common.edit": "Bearbeiten",
-            "common.add": "Hinzufügen",
-            "common.trash": "Papierkorb",
-            
-            // Legal & Support
-            "settings.legal": "Rechtliches & Support",
-            "settings.support_email": "Support-E-Mail",
-            "settings.report_bug": "Fehler melden",
-            "settings.licenses": "Open-Source-Lizenzen",
-            "settings.app_license": "App-Lizenz",
-            
-            // Attachment
-            "attachment.title": "Anhang",
-            "attachment.document": "Dokument angehängt",
-            
-            // Payment Methods
-            "payment.cash": "Bargeld",
-            "payment.card": "Karte",
-        ],
-        
-        "es": [
-            // Tabs
-            "tab.dashboard": "Panel",
-            "tab.transactions": "Transacciones",
-            "tab.budget": "Presupuesto",
-            "tab.insights": "Perspectivas",
-            "tab.settings": "Ajustes",
-            
-            // Dashboard
-            "dashboard.title": "Balance",
-            "dashboard.data_for_month": "Datos de este mes",
-            "dashboard.start_from_zero": "Empezar desde cero",
-            "dashboard.set_budget_first": "Establezca primero su presupuesto mensual. El análisis comenzará de inmediato.",
-            "dashboard.daily_trend": "Tendencia de gastos diarios",
-            "dashboard.no_trend_data": "Aún no hay datos de tendencia. Agregue algunas transacciones.",
-            "dashboard.category_breakdown": "Desglose por categoría",
-            "dashboard.payment_breakdown": "Desglose de pagos",
-            "dashboard.cash_vs_card": "Efectivo vs Tarjeta",
-            "dashboard.no_payment_data": "Aún no hay datos de pago. Agregue transacciones para ver el desglose.",
-            "dashboard.payment_insight_cash_heavy": "Está usando principalmente efectivo. Considere rastrear también los gastos con tarjeta.",
-            "dashboard.payment_insight_card_heavy": "La mayoría de los gastos son con tarjeta. ¡Bueno para rastrear!",
-            "dashboard.payment_insight_balanced": "Buen equilibrio entre pagos en efectivo y con tarjeta.",
-            "dashboard.category_breakdown_empty": "Una vez que agregue transacciones, los totales por categoría aparecerán aquí.",
-            "dashboard.advisor_insights": "Perspectivas del asesor",
-            "dashboard.honest_no_blame": "Honesto, sin culpa",
-            "dashboard.add_expenses": "Agregue algunos gastos cotidianos para una evaluación más precisa.",
-            "dashboard.quick_actions": "Acciones rápidas recomendadas",
-            "dashboard.no_action_needed": "No se necesita acción urgente. Manténgase consistente.",
-            "dashboard.step1_title": "Paso 1: Establezca su presupuesto mensual",
-            "dashboard.step1_desc": "Sin un presupuesto, los números no tienen objetivo. Establezca un presupuesto realista, luego tomaremos el control paso a paso.",
-            "dashboard.go_to_budget": "Ir al Presupuesto",
-            "dashboard.delete_month": "¿Eliminar datos de este mes?",
-            "dashboard.delete_month_msg": "Todas las transacciones, el presupuesto mensual y los límites de categoría para este mes se eliminarán permanentemente.",
-            "dashboard.delete_confirm": "Eliminar",
-            "dashboard.month_cleared": "Este mes ya ha sido borrado. No queda nada por eliminar.",
-            "dashboard.month_deleted": "Los datos de este mes se eliminaron exitosamente",
-            "dashboard.this_month": "Este mes",
-            
-            // Month Picker
-            "month.this_month": "Este mes",
-            
-            // Budget Status
-            "status.stable": "Estable",
-            "status.stable_desc": "Los gastos están bajo control. Mantenga el patrón.",
-            "status.needs_attention": "Requiere atención",
-            "status.needs_attention_desc": "Se está acercando al límite del presupuesto. Revise los gastos discrecionales.",
-            "status.budget_pressure": "Presión presupuestaria",
-            "status.budget_pressure_desc": "Los gastos son muy altos. Reduzca los costos no esenciales.",
-            "status.analysis_paused": "Análisis en pausa",
-            "status.analysis_paused_desc": "El panel y las perspectivas se desbloquean después de establecer un presupuesto.",
-            "status.budget_set": "Presupuesto establecido",
-            "status.budget_set_desc": "Ahora puede agregar transacciones y obtener análisis reales.",
-            
-            // KPIs
-            "kpi.spent": "Gastado",
-            "kpi.remaining": "Restante",
-            "kpi.daily_avg": "Prom. diario",
-            
-            // Budget
-            "budget.title": "Presupuesto",
-            "budget.set_monthly": "Establecer presupuesto mensual",
-            "budget.keep_realistic": "Sé realista. Puedes ajustarlo en cualquier momento.",
-            "budget.start": "Comenzar",
-            "budget.update": "Actualizar",
-            "budget.this_month": "Este mes",
-            "budget.budget_used": "Presupuesto usado",
-            "budget.used_percent": "usado",
-            "budget.spent": "Gastado",
-            "budget.remaining": "Restante",
-            "budget.month_not_complete": "Mes aún no completado",
-            "budget.on_track": "En camino",
-            "budget.over_budget": "Sobre presupuesto",
-            "budget.saved_vs_prev": "Ahorrado vs mes anterior",
-            "budget.total_saved": "Total ahorrado (meses pasados)",
-            "budget.category_budgets": "Presupuestos por categoría",
-            "budget.category_caps_desc": "Opcional: establezca límites por categoría. Deje vacío para sin límite.",
-            "budget.allocated": "Asignado",
-            "budget.unallocated": "No asignado",
-            "budget.caps_exceed": "Los límites de categoría exceden el presupuesto total",
-            "budget.caps_exceed_desc": "Reduzca uno o más presupuestos de categoría para que la asignación permanezca dentro del total mensual.",
-            
-            // Transactions
-            "transactions.title": "Transacciones",
-            "transactions.select": "Seleccionar",
-            "transactions.select_all": "Seleccionar todo",
-            "transactions.delete": "Eliminar",
-            "transactions.cancel": "Cancelar",
-            "transactions.search_placeholder": "Buscar categoría / nota",
-            "transactions.delete_confirm": "¿Eliminar transacción?",
-            "transactions.delete_multiple": "¿Eliminar %d transacciones?",
-            "transactions.cannot_undo": "Esta acción no se puede deshacer.",
-            "transactions.deleted": "%d transacción eliminada",
-            "transactions.undo": "Deshacer",
-            "transactions.view_attachment": "Ver adjunto",
-            "transactions.edit": "Editar",
-            
-            // Add/Edit Transaction
-            "transaction.add": "Agregar gasto",
-            "transaction.edit": "Editar gasto",
-            "transaction.amount": "Cantidad",
-            "transaction.amount_placeholder": "ej. 250.00",
-            "transaction.category": "Categoría",
-            "transaction.add_category": "Agregar",
-            "transaction.new_category": "Nueva categoría",
-            "transaction.new_category_msg": "Cree una categoría personalizada para sus transacciones.",
-            "transaction.new_category_placeholder": "ej. Café",
-            "transaction.date": "Fecha",
-            "transaction.note": "Nota (opcional)",
-            "transaction.note_placeholder": "ej. comestibles",
-            "transaction.attachment": "Adjunto (opcional)",
-            "transaction.add_attachment": "Agregar imagen o archivo",
-            "transaction.attach_photo": "Biblioteca de fotos",
-            "transaction.attach_file": "Archivos",
-            "transaction.save": "Guardar",
-            "transaction.save_changes": "Guardar cambios",
-            "transaction.close": "Cerrar",
-            "transaction.advisor_note": "Nota del asesor: el seguimiento preciso es el camino más rápido hacia el control.",
-            "transaction.payment_method": "Método de pago",
-            
-            // Filters
-            "filters.title": "Filtros",
-            "filters.categories": "Categorías",
-            "filters.all": "Todos",
-            "filters.clear": "Limpiar",
-            "filters.tip_one_category": "Consejo: seleccione al menos una categoría.",
-            "filters.date_range": "Rango de fechas",
-            "filters.from": "Desde",
-            "filters.to": "Hasta",
-            "filters.date_range_off": "Desactivado — mostrando todas las fechas en el mes seleccionado.",
-            "filters.amount_range": "Rango de cantidad",
-            "filters.min": "Mín (€)",
-            "filters.max": "Máx (€)",
-            "filters.amount_example": "Las cantidades están en EUR. Ejemplo: 12.50",
-            "filters.reset": "Restablecer",
-            "filters.apply": "Aplicar",
-            "filters.close": "Cerrar",
-            
-            // Import
-            "import.title": "Importar",
-            "import.from_csv": "Importar transacciones desde CSV",
-            "import.csv_columns": "Columnas CSV recomendadas (se prefiere fila de encabezado):",
-            "import.csv_format": "fecha (requerida), cantidad (requerida, EUR), categoría (requerida), nota (opcional)",
-            "import.duplicate_note": "Nota: Si importa el mismo CSV nuevamente, Balance solo agregará transacciones que aún no estén en la aplicación (se omiten duplicados).",
-            "import.choose_file": "Elegir archivo CSV",
-            "import.xlsx_tip": "Consejo: Si su archivo es .xlsx, expórtelo como CSV en Excel, luego impórtelo aquí.",
-            "import.columns": "Columnas",
-            "import.header_row": "Fila de encabezado",
-            "import.preview": "Vista previa",
-            "import.import_btn": "Importar en Balance",
-            "import.mode_title": "Modo de importación",
-            "import.mode_message": "Tiene %d transacción(es) existente(s). ¿Desea conservarlas y agregar los datos importados (Combinar) o eliminarlas y conservar solo los datos importados (Reemplazar)?",
-            "import.mode_merge": "Combinar",
-            "import.mode_replace": "Reemplazar",
-            "import.done": "Hecho",
-            
-            // Insights
-            "insights.title": "Perspectivas",
-            "insights.not_ready": "Las perspectivas no están listas",
-            "insights.set_budget_first": "Establezca primero su presupuesto mensual para desbloquear el análisis.",
-            "insights.analytical_report": "Informe analítico",
-            "insights.trend_pressure": "Esta tendencia presionará su presupuesto",
-            "insights.trend_pressure_desc": "La proyección de fin de mes está por encima del presupuesto. Priorice recortar costos discrecionales.",
-            "insights.approaching_limit": "Acercándose al límite",
-            "insights.approaching_limit_desc": "Para mantener el control, reduzca ligeramente una categoría discrecional.",
-            "insights.projection_note": "La proyección utiliza un promedio diario robusto (reduce el impacto de un día inusual). Las nuevas transacciones refinan la estimación.",
-            "insights.insights_title": "Perspectivas",
-            "insights.no_data": "Aún no hay suficientes datos. Agregue algunas transacciones.",
-            "insights.notifications": "Notificaciones",
-            "insights.notifications_desc": "Reciba recordatorios para revisar su presupuesto y gastos.",
-            "insights.notification_status": "Estado de notificación",
-            "insights.send_test": "Enviar notificación de prueba",
-            "insights.test_tip": "Consejo: active las notificaciones, luego toque el botón de prueba.",
-            "insights.export": "Exportar",
-            "insights.export_share": "Compartir",
-            "insights.export_desc": "Exporte su mes como una tabla limpia para Excel o como CSV.",
-            "insights.export_excel": "Excel",
-            "insights.export_csv": "CSV",
-            "insights.export_tip": "Consejo: la exportación de Excel incluye varias hojas (Resumen, Transacciones, Categorías, Diario).",
-            "insights.ai_analysis": "Análisis de IA",
-            "insights.ai_powered": "Impulsado por la nube",
-            "insights.ai_desc": "Obtenga una explicación más inteligente de lo que impulsó sus gastos y qué hacer a continuación.",
-            "insights.ai_analyze": "Analizar este mes",
-            
-            // AI Insights
-            "ai.title": "Perspectivas de IA",
-            "ai.close": "Cerrar",
-            "ai.tip": "Consejo: Perspectivas generadas por IA basadas en sus datos de gastos. Los resultados pueden ser imperfectos: úselos como guía.",
-            "ai.analyzing": "Analizando…",
-            "ai.run_analysis": "Ejecutar análisis",
-            "ai.reanalyze": "Volver a analizar",
-            "ai.last_analyzed": "Último análisis: %@",
-            "ai.summary": "Resumen",
-            "ai.insights": "Perspectivas",
-            "ai.actions": "Acciones recomendadas",
-            "ai.risk": "Riesgo",
-            "ai.risk_level": "Nivel de riesgo",
-            "ai.error": "No se pudo analizar",
-            
-            // Settings
-            "settings.title": "Ajustes",
-            "settings.app_settings": "Ajustes de la aplicación",
-            "settings.currency": "Moneda",
-            "settings.language": "Idioma",
-            "settings.language_note": "Nota: El cambio de idioma tendrá efecto inmediatamente.",
-            "settings.developer": "Desarrollador",
-            "settings.developed_by": "Desarrollado por",
-            "settings.version": "Versión",
-            "settings.build": "Compilación",
-            "settings.about": "Acerca de Balance",
-            "settings.about_desc": "Balance es una aplicación de finanzas personales diseñada para ayudarlo a controlar sus gastos, paso a paso. Rastree gastos, establezca presupuestos y obtenga información sobre sus hábitos financieros.",
-            "settings.feature_privacy": "Privacidad primero - todos los datos almacenados localmente",
-            "settings.feature_insights": "Perspectivas y proyecciones inteligentes",
-            "settings.feature_ai": "Análisis impulsado por IA",
-            "settings.feature_import": "Importar y exportar transacciones",
-            
-            // Categories
-            "category.groceries": "Comestibles",
-            "category.rent": "Alquiler",
-            "category.bills": "Facturas",
-            "category.transport": "Transporte",
-            "category.health": "Salud",
-            "category.education": "Educación",
-            "category.dining": "Comidas",
-            "category.shopping": "Compras",
-            "category.entertainment": "Entretenimiento",
-            "category.other": "Otro",
-            
-            // Common
-            "common.ok": "common.ok",
-            "common.done": "Hecho",
-            "common.yes": "Sí",
-            "common.no": "common.no",
-            "common.close": "Cerrar",
-            "common.cancel": "Cancelar",
-            "common.delete": "Eliminar",
-            "common.save": "Guardar",
-            "common.edit": "Editar",
-            "common.add": "Agregar",
-            "common.trash": "Papelera",
-            
-            // Legal & Support
-            "settings.legal": "Legal y Soporte",
-            "settings.support_email": "Correo de soporte",
-            "settings.report_bug": "Reportar un error",
-            "settings.licenses": "Licencias de código abierto",
-            "settings.app_license": "Licencia de la aplicación",
-            
-            // Attachment
-            "attachment.title": "Adjunto",
-            "attachment.document": "Documento adjunto",
-            
-            // Payment Methods
-            "payment.cash": "Efectivo",
-            "payment.card": "Tarjeta",
-        ],
-        
-        "fa": [
-            // Tabs
-            "tab.dashboard": "داشبورد",
-            "tab.transactions": "تراکنش‌ها",
-            "tab.budget": "بودجه",
-            "tab.insights": "تحلیل‌ها",
-            "tab.settings": "تنظیمات",
-            
-            // Dashboard
-            "dashboard.title": "تراز",
-            "dashboard.data_for_month": "داده‌های این ماه",
-            "dashboard.start_from_zero": "از صفر شروع کنید",
-            "dashboard.set_budget_first": "ابتدا بودجه ماهانه خود را تعیین کنید. تحلیل بلافاصله شروع می‌شود.",
-            "dashboard.daily_trend": "روند هزینه روزانه",
-            "dashboard.no_trend_data": "هنوز داده‌ای برای روند وجود ندارد. چند تراکنش اضافه کنید.",
-            "dashboard.category_breakdown": "تفکیک دسته‌بندی",
-            "dashboard.payment_breakdown": "تفکیک روش پرداخت",
-            "dashboard.cash_vs_card": "نقدی در مقابل کارت",
-            "dashboard.no_payment_data": "هنوز داده پرداختی وجود ندارد. برای مشاهده تفکیک، تراکنش اضافه کنید.",
-            "dashboard.payment_insight_cash_heavy": "بیشتر از نقدی استفاده میu200cکنید. پیگیری هزینهu200cهای کارتی را هم در نظر بگیرید.",
-            "dashboard.payment_insight_card_heavy": "بیشتر هزینهu200cها با کارت است. برای پیگیری عالی است!",
-            "dashboard.payment_insight_balanced": "تعادل خوبی بین پرداختu200cهای نقدی و کارتی.",
-            "dashboard.category_breakdown_empty": "پس از اضافه کردن تراکنش‌ها، مجموع دسته‌بندی‌ها اینجا نمایش داده می‌شود.",
-            "dashboard.advisor_insights": "تحلیل‌های مشاور",
-            "dashboard.honest_no_blame": "صادقانه، بدون سرزنش",
-            "dashboard.add_expenses": "چند هزینه روزمره اضافه کنید برای ارزیابی دقیق‌تر.",
-            "dashboard.quick_actions": "اقدامات سریع پیشنهادی",
-            "dashboard.no_action_needed": "نیازی به اقدام فوری نیست. ثابت قدم باشید.",
-            "dashboard.step1_title": "گام ۱: بودجه ماهانه خود را تعیین کنید",
-            "dashboard.step1_desc": "بدون بودجه، اعداد هدفی ندارند. یک بودجه واقع‌بینانه تعیین کنید—سپس گام به گام کنترل را به دست می‌گیریم.",
-            "dashboard.go_to_budget": "برو به بودجه",
-            "dashboard.delete_month": "داده‌های این ماه حذف شود؟",
-            "dashboard.delete_month_msg": "تمام تراکنش‌ها، بودجه ماهانه و محدودیت‌های دسته‌بندی برای این ماه برای همیشه حذف خواهند شد.",
-            "dashboard.delete_confirm": "حذف",
-            "dashboard.month_cleared": "این ماه قبلاً پاک شده است. چیزی برای حذف باقی نمانده.",
-            "dashboard.month_deleted": "داده‌های این ماه با موفقیت حذف شد",
-            "dashboard.this_month": "این ماه",
-            
-            // Month Picker
-            "month.this_month": "این ماه",
-            
-            // Budget Status
-            "status.stable": "پایدار",
-            "status.stable_desc": "هزینه‌ها تحت کنترل است. این الگو را حفظ کنید.",
-            "status.needs_attention": "نیاز به توجه",
-            "status.needs_attention_desc": "به محدودیت بودجه نزدیک می‌شوید. هزینه‌های اختیاری را بررسی کنید.",
-            "status.budget_pressure": "فشار بودجه",
-            "status.budget_pressure_desc": "هزینه‌ها بسیار زیاد است. هزینه‌های غیرضروری را کاهش دهید.",
-            "status.analysis_paused": "تحلیل متوقف شده",
-            "status.analysis_paused_desc": "داشبورد و تحلیل‌ها پس از تعیین بودجه فعال می‌شوند.",
-            "status.budget_set": "بودجه تعیین شد",
-            "status.budget_set_desc": "اکنون می‌توانید تراکنش اضافه کنید و تحلیل واقعی دریافت کنید.",
-            
-            // KPIs
-            "kpi.spent": "خرج شده",
-            "kpi.remaining": "باقیمانده",
-            "kpi.daily_avg": "میانگین روزانه",
-            
-            // Budget
-            "budget.title": "بودجه",
-            "budget.set_monthly": "بودجه ماهانه تعیین کنید",
-            "budget.keep_realistic": "واقع‌بینانه باشید. می‌توانید هر زمان تغییرش دهید.",
-            "budget.start": "شروع",
-            "budget.update": "بروزرسانی",
-            "budget.this_month": "این ماه",
-            "budget.budget_used": "بودجه مصرف شده",
-            "budget.used_percent": "استفاده شده",
-            "budget.spent": "خرج شده",
-            "budget.remaining": "باقیمانده",
-            "budget.month_not_complete": "ماه هنوز کامل نشده",
-            "budget.on_track": "در مسیر",
-            "budget.over_budget": "بیش از بودجه",
-            "budget.saved_vs_prev": "پس‌انداز نسبت به ماه قبل",
-            "budget.total_saved": "کل پس‌انداز (ماه‌های گذشته)",
-            "budget.category_budgets": "بودجه دسته‌بندی‌ها",
-            "budget.category_caps_desc": "اختیاری: سقف برای هر دسته تعیین کنید. برای بدون سقف خالی بگذارید.",
-            "budget.allocated": "تخصیص داده شده",
-            "budget.unallocated": "تخصیص نیافته",
-            "budget.caps_exceed": "سقف دسته‌بندی‌ها از کل بودجه بیشتر است",
-            "budget.caps_exceed_desc": "یک یا چند بودجه دسته‌بندی را کاهش دهید تا تخصیص در کل ماهانه باقی بماند.",
-            
-            // Transactions
-            "transactions.title": "تراکنش‌ها",
-            "transactions.before_add": "قبل از اضافه کردن تراکنش",
-            "transactions.select": "انتخاب",
-            "transactions.select_all": "انتخاب همه",
-            "transactions.delete": "حذف",
-            "transactions.cancel": "لغو",
-            "transactions.search_placeholder": "جستجوی دسته‌بندی / یادداشت",
-            "transactions.delete_confirm": "تراکنش حذف شود؟",
-            "transactions.delete_multiple": "%d تراکنش حذف شود؟",
-            "transactions.cannot_undo": "این عمل قابل بازگشت نیست.",
-            "transactions.deleted": "%d تراکنش حذف شد",
-            "transactions.undo": "بازگشت",
-            "transactions.view_attachment": "مشاهده پیوست",
-            "transactions.edit": "ویرایش",
-            
-            // Add/Edit Transaction
-            "transaction.add": "افزودن هزینه",
-            "transaction.edit": "ویرایش هزینه",
-            "transaction.amount": "مبلغ",
-            "transaction.amount_placeholder": "مثلاً 250.00",
-            "transaction.category": "دسته‌بندی",
-            "transaction.add_category": "افزودن",
-            "transaction.new_category": "دسته‌بندی جدید",
-            "transaction.new_category_msg": "یک دسته‌بندی سفارشی برای تراکنش‌های خود ایجاد کنید.",
-            "transaction.new_category_placeholder": "مثلاً قهوه",
-            "transaction.date": "تاریخ",
-            "transaction.note": "یادداشت (اختیاری)",
-            "transaction.note_placeholder": "مثلاً خواربار",
-            "transaction.attachment": "پیوست (اختیاری)",
-            "transaction.add_attachment": "افزودن عکس یا فایل",
-            "transaction.attach_photo": "کتابخانه عکس",
-            "transaction.attach_file": "فایل‌ها",
-            "transaction.save": "ذخیره",
-            "transaction.save_changes": "ذخیره تغییرات",
-            "transaction.close": "بستن",
-            "transaction.advisor_note": "یادداشت مشاور: ثبت دقیق، سریع‌ترین راه به کنترل است.",
-            "transaction.payment_method": "روش پرداخت",
-            
-            // Filters
-            "filters.title": "فیلترها",
-            "filters.categories": "دسته‌بندی‌ها",
-            "filters.all": "همه",
-            "filters.clear": "پاک کردن",
-            "filters.tip_one_category": "نکته: حداقل یک دسته‌بندی انتخاب کنید.",
-            "filters.date_range": "بازه تاریخ",
-            "filters.from": "از",
-            "filters.to": "تا",
-            "filters.date_range_off": "خاموش — نمایش تمام تاریخ‌ها در ماه انتخاب شده.",
-            "filters.amount_range": "بازه مبلغ",
-            "filters.min": "حداقل (€)",
-            "filters.max": "حداکثر (€)",
-            "filters.amount_example": "مبالغ به یورو هستند. مثال: 12.50",
-            "filters.reset": "بازنشانی",
-            "filters.apply": "اعمال",
-            "filters.close": "بستن",
-            
-            // Import
-            "import.title": "ورود داده",
-            "import.from_csv": "وارد کردن تراکنش‌ها از CSV",
-            "import.csv_columns": "ستون‌های CSV پیشنهادی (سطر سرتیتر ترجیح داده می‌شود):",
-            "import.csv_format": "تاریخ (ضروری)، مبلغ (ضروری، یورو)، دسته‌بندی (ضروری)، یادداشت (اختیاری)",
-            "import.duplicate_note": "توجه: اگر همان CSV را دوباره وارد کنید، تراز فقط تراکنش‌هایی را اضافه می‌کند که قبلاً در برنامه نیستند (تکراری‌ها رد می‌شوند).",
-            "import.choose_file": "انتخاب فایل CSV",
-            "import.xlsx_tip": "نکته: اگر فایل شما .xlsx است، آن را به عنوان CSV در اکسل ذخیره کنید، سپس اینجا وارد کنید.",
-            "import.columns": "ستون‌ها",
-            "import.header_row": "سطر سرتیتر",
-            "import.preview": "پیش‌نمایش",
-            "import.import_btn": "وارد کردن در تراز",
-            "import.mode_title": "حالت وارد کردن",
-            "import.mode_message": "شما %d تراکنش موجود دارید. آیا می‌خواهید آنها را نگه دارید و داده‌های وارد شده را اضافه کنید (ادغام)، یا آنها را حذف کنید و فقط داده‌های وارد شده را نگه دارید (جایگزینی)?",
-            "import.mode_merge": "ادغام",
-            "import.mode_replace": "جایگزینی",
-            "import.done": "تمام",
-            
-            // Insights
-            "insights.title": "تحلیل‌ها",
-            "insights.not_ready": "تحلیل‌ها آماده نیست",
-            "insights.set_budget_first": "ابتدا بودجه ماهانه خود را تعیین کنید تا تحلیل فعال شود.",
-            "insights.analytical_report": "گزارش تحلیلی",
-            "insights.trend_pressure": "این روند به بودجه شما فشار وارد می‌کند",
-            "insights.trend_pressure_desc": "پیش‌بینی پایان ماه بالاتر از بودجه است. اولویت را به کاهش هزینه‌های اختیاری بدهید.",
-            "insights.approaching_limit": "نزدیک به محدودیت",
-            "insights.approaching_limit_desc": "برای حفظ کنترل، یک دسته‌بندی اختیاری را اندکی کاهش دهید.",
-            "insights.projection_note": "پیش‌بینی از میانگین روزانه قوی استفاده می‌کند (تأثیر یک روز غیرعادی را کاهش می‌دهد). تراکنش‌های جدید تخمین را بهبود می‌بخشند.",
-            "insights.insights_title": "تحلیل‌ها",
-            "insights.no_data": "هنوز داده کافی وجود ندارد. چند تراکنش اضافه کنید.",
-            "insights.notifications": "اعلان‌ها",
-            "insights.notifications_desc": "یادآوری‌هایی برای بررسی بودجه و هزینه‌های خود دریافت کنید.",
-            "insights.notification_status": "وضعیت اعلان",
-            "insights.send_test": "ارسال اعلان آزمایشی",
-            "insights.test_tip": "نکته: اعلان‌ها را روشن کنید، سپس دکمه آزمایش را بزنید.",
-            "insights.export": "خروجی",
-            "insights.export_share": "اشتراک‌گذاری",
-            "insights.export_desc": "ماه خود را به عنوان جدول تمیز برای اکسل یا CSV خروجی بگیرید.",
-            "insights.export_excel": "اکسل",
-            "insights.export_csv": "CSV",
-            "insights.export_tip": "نکته: خروجی اکسل شامل چندین برگه است (خلاصه، تراکنش‌ها، دسته‌بندی‌ها، روزانه).",
-            "insights.ai_analysis": "تحلیل هوش مصنوعی",
-            "insights.ai_powered": "قدرت گرفته از ابر",
-            "insights.ai_desc": "توضیح هوشمندانه‌تری از عوامل هزینه‌ها و اقدامات بعدی دریافت کنید.",
-            "insights.ai_analyze": "تحلیل این ماه",
-            
-            // AI Insights
-            "ai.title": "تحلیل‌های هوش مصنوعی",
-            "ai.close": "بستن",
-            "ai.tip": "نکته: تحلیل‌های تولید شده توسط هوش مصنوعی بر اساس داده‌های هزینه شما. نتایج ممکن است ناقص باشند — از آنها به عنوان راهنما استفاده کنید.",
-            "ai.analyzing": "در حال تحلیل…",
-            "ai.run_analysis": "اجرای تحلیل",
-            "ai.reanalyze": "تحلیل مجدد",
-            "ai.last_analyzed": "آخرین تحلیل: %@",
-            "ai.summary": "خلاصه",
-            "ai.insights": "تحلیل‌ها",
-            "ai.actions": "اقدامات پیشنهادی",
-            "ai.risk": "ریسک",
-            "ai.risk_level": "سطح ریسک",
-            "ai.error": "امکان تحلیل وجود نداشت",
-            
-            // Settings
-            "settings.title": "تنظیمات",
-            "settings.app_settings": "تنظیمات برنامه",
-            "settings.currency": "واحد پول",
-            "settings.language": "زبان",
-            "settings.language_note": "توجه: تغییر زبان بلافاصله اعمال می‌شود.",
-            "settings.developer": "توسعه‌دهنده",
-            "settings.developed_by": "توسعه یافته توسط",
-            "settings.version": "نسخه",
-            "settings.build": "ساخت",
-            "settings.about": "درباره تراز",
-            "settings.about_desc": "تراز یک برنامه مالی شخصی است که برای کمک به شما در کنترل هزینه‌هایتان، گام به گام طراحی شده است. هزینه‌ها را ردیابی کنید، بودجه تعیین کنید و از عادات مالی خود بینش کسب کنید.",
-            "settings.feature_privacy": "حریم خصوصی اول - تمام داده‌ها به صورت محلی ذخیره می‌شوند",
-            "settings.feature_insights": "تحلیل‌ها و پیش‌بینی‌های هوشمند",
-            "settings.feature_ai": "تحلیل با قدرت هوش مصنوعی",
-            "settings.feature_import": "وارد و خارج کردن تراکنش‌ها",
-            
-            // Categories
-            "category.groceries": "خواربار",
-            "category.rent": "اجاره",
-            "category.bills": "قبوض",
-            "category.transport": "حمل و نقل",
-            "category.health": "سلامت",
-            "category.education": "آموزش",
-            "category.dining": "غذا بیرون",
-            "category.shopping": "خرید",
-            "category.entertainment": "سرگرمی",
-            "category.other": "سایر",
-            
-            // Common
-            "common.ok": "باشه",
-            "common.done": "تمام",
-            "common.yes": "بله",
-            "common.no": "خیر",
-            "common.close": "بستن",
-            "common.cancel": "لغو",
-            "common.delete": "حذف",
-            "common.save": "ذخیره",
-            "common.edit": "ویرایش",
-            "common.add": "افزودن",
-            "common.trash": "سطل زباله",
-            
-            // Legal & Support
-            "settings.legal": "قانونی و پشتیبانی",
-            "settings.support_email": "ایمیل پشتیبانی",
-            "settings.report_bug": "گزارش باگ",
-            "settings.licenses": "مجوزهای منبع باز",
-            "settings.app_license": "مجوز برنامه",
-            
-            // Attachment
-            "attachment.title": "پیوست",
-            "attachment.document": "سند پیوست شده",
-            
-            // Payment Methods
-            "payment.cash": "نقدی",
-            "payment.card": "کارت",
-        ],
-    ]
-}
 // MARK: - Root
 
 struct ContentView: View {
@@ -1647,16 +555,24 @@ private struct LaunchScreenView: View {
     
     var body: some View {
         ZStack {
-            // Background
+            backgroundLayer
+            logoLayer
+        }
+        .onAppear {
+            startAnimation()
+        }
+    }
+
+    private var backgroundLayer: some View {
+        ZStack {
             DS.Colors.bg.ignoresSafeArea()
             
-            // Animated background circle - آبی بنفش
             Circle()
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color(hex: 0x667EEA).opacity(0.15),  // آبی بنفش روشن
-                            Color(hex: 0x764BA2).opacity(0.08),  // بنفش
+                            Color(hex: 0x667EEA).opacity(0.15),
+                            Color(hex: 0x764BA2).opacity(0.08),
                             Color.clear
                         ],
                         center: .center,
@@ -1667,37 +583,33 @@ private struct LaunchScreenView: View {
                 .frame(width: 600, height: 600)
                 .scaleEffect(circleScale)
                 .opacity(circleOpacity)
-            
-            VStack(spacing: 24) {
-                // Logo - بدون آیکون، فقط متن
-                VStack(spacing: 8) {
-                    // App name با گرادینت آبی-بنفش
-                    Text("Balance")
-                        .font(.system(size: 52, weight: .bold, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [
-                                    Color(hex: 0x667EEA),  // آبی
-                                    Color(hex: 0x96a8fa)   // بنفش
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .offset(y: titleOffset)
-                        .opacity(titleOpacity)
-                    
-                    // Tagline
-                    Text("Control your spending, step by step")
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundStyle(DS.Colors.subtext)
-                        .offset(y: taglineOffset)
-                        .opacity(taglineOpacity)
-                }
-            }
         }
-        .onAppear {
-            startAnimation()
+    }
+
+    private var logoLayer: some View {
+        VStack(spacing: 24) {
+            VStack(spacing: 8) {
+                Text("Balance")
+                    .font(.system(size: 52, weight: .bold, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                Color(hex: 0x667EEA),
+                                Color(hex: 0x96a8fa)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .offset(y: titleOffset)
+                    .opacity(titleOpacity)
+                
+                Text("Control your spending, step by step")
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundStyle(DS.Colors.subtext)
+                    .offset(y: taglineOffset)
+                    .opacity(taglineOpacity)
+            }
         }
     }
     
@@ -2601,105 +1513,104 @@ private struct TransactionsView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                DS.Colors.bg.ignoresSafeArea()
-
-                if store.budgetTotal <= 0 {
-                    noBudgetView
-                } else {
-                    transactionsListView
+            transactionsContent
+                .navigationTitle(L10n.t("transactions.title"))
+                .toolbar { toolbarItems }
+                .searchable(text: $search, prompt: L10n.t("transactions.search_placeholder"))
+                .confirmationDialog(
+                    "Delete \(selectedTxIDs.count) transactions?",
+                    isPresented: isBulkDeleteDialogPresented,
+                    titleVisibility: .visible
+                ) {
+                    bulkDeleteActions
+                } message: {
+                    Text("This action can’t be undone.")
                 }
-            }
-            .navigationTitle(L10n.t("transactions.title"))
-            .navigationTitle(L10n.t("transactions.title"))
-            
-            .toolbar { toolbarItems }
-            .searchable(text: $search, prompt: L10n.t("transactions.search_placeholder"))
-            .confirmationDialog(
-                "Delete \(selectedTxIDs.count) transactions?",
-                isPresented: isBulkDeleteDialogPresented,
-                titleVisibility: .visible
-            ) {
-                Button(L10n.t("common.delete"), role: .destructive) {
-                    // Capture selection first
-                    let ids = selectedTxIDs
-
-                    // stash for undo
-                    pendingUndo = store.transactions.filter { ids.contains($0.id) }
-
-                    // Dismiss dialog + exit selecting mode BEFORE mutating the list
-                    showBulkDeletePopover = false
-                    isSelecting = false
-                    selectedTxIDs.removeAll()
-
-                    withAnimation(uiAnim) {
-                        // Track deleted IDs for sync
-                        for id in ids {
-                            if !store.deletedTransactionIds.contains(id.uuidString) {
-                                store.deletedTransactionIds.append(id.uuidString)
-                            }
-                        }
-                        store.transactions.removeAll { ids.contains($0.id) }
+                .navigationDestination(isPresented: $showImport) {
+                    ImportTransactionsScreen(store: $store)
+                }
+                .onAppear {
+                    // Default: select all (including custom categories)
+                    if selectedCategories.isEmpty {
+                        selectedCategories = Set(store.allCategories)
                     }
-                    scheduleUndoCommit()
                 }
-                Button("common.cancel", role: .cancel) {
-                    showBulkDeletePopover = false
+                .sheet(isPresented: $showAdd) {
+                    AddTransactionSheet(store: $store, initialMonth: store.selectedMonth)
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
                 }
-            } message: {
-                Text("This action can’t be undone.")
-            }
-            .navigationDestination(isPresented: $showImport) {
-                ImportTransactionsScreen(store: $store)
-            }
+                .sheet(item: editingWrapper) { wrapper in
+                    EditTransactionSheet(store: $store, transactionID: wrapper.id)
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
+                }
+                .sheet(item: Binding(
+                    get: { viewingAttachment },
+                    set: { viewingAttachment = $0 }
+                )) { transaction in
+                    if let data = transaction.attachmentData, let type = transaction.attachmentType {
+                        AttachmentViewer(attachmentData: data, attachmentType: type)
+                    }
+                }
+                .sheet(item: Binding(
+                    get: { inspectingTransaction },
+                    set: { inspectingTransaction = $0 }
+                )) { transaction in
+                    TransactionInspectSheet(transaction: transaction, store: $store)
+                }
+                .sheet(isPresented: $showRecurring) {
+                    RecurringTransactionsView(store: $store)
+                }
+                .fullScreenCover(isPresented: $showFilters) {
+                    TransactionsFilterSheet(
+                        selectedCategories: $selectedCategories,
+                        categories: store.allCategories,
+                        useDateRange: $useDateRange,
+                        dateFrom: $dateFrom,
+                        dateTo: $dateTo,
+                        minAmountText: $minAmountText,
+                        maxAmountText: $maxAmountText,
+                        selectedPaymentMethods: $selectedPaymentMethods  // ← جدید
+                    )
+                }
+        }
+    }
 
-        }
-        .onAppear {
-            // Default: select all (including custom categories)
-            if selectedCategories.isEmpty {
-                selectedCategories = Set(store.allCategories)
+    private var transactionsContent: some View {
+        ZStack {
+            DS.Colors.bg.ignoresSafeArea()
+
+            if store.budgetTotal <= 0 {
+                noBudgetView
+            } else {
+                transactionsListView
             }
         }
-        .sheet(isPresented: $showAdd) {
-            AddTransactionSheet(store: $store, initialMonth: store.selectedMonth)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(item: editingWrapper) { wrapper in
-            EditTransactionSheet(store: $store, transactionID: wrapper.id)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(item: Binding(
-            get: { viewingAttachment },
-            set: { viewingAttachment = $0 }
-        )) { transaction in
-            if let data = transaction.attachmentData, let type = transaction.attachmentType {
-                AttachmentViewer(attachmentData: data, attachmentType: type)
+    }
+
+    @ViewBuilder
+    private var bulkDeleteActions: some View {
+        Button(L10n.t("common.delete"), role: .destructive) {
+            let ids = selectedTxIDs
+            pendingUndo = store.transactions.filter { ids.contains($0.id) }
+            showBulkDeletePopover = false
+            isSelecting = false
+            selectedTxIDs.removeAll()
+
+            withAnimation(uiAnim) {
+                for id in ids {
+                    if !store.deletedTransactionIds.contains(id.uuidString) {
+                        store.deletedTransactionIds.append(id.uuidString)
+                    }
+                }
+                store.transactions.removeAll { ids.contains($0.id) }
             }
+            scheduleUndoCommit()
         }
-        .sheet(item: Binding(
-            get: { inspectingTransaction },
-            set: { inspectingTransaction = $0 }
-        )) { transaction in
-            TransactionInspectSheet(transaction: transaction, store: $store)
+        Button("common.cancel", role: .cancel) {
+            showBulkDeletePopover = false
         }
-        .sheet(isPresented: $showRecurring) {
-            RecurringTransactionsView(store: $store)
-        }
-        .fullScreenCover(isPresented: $showFilters) {
-            TransactionsFilterSheet(
-                selectedCategories: $selectedCategories,
-                categories: store.allCategories,
-                useDateRange: $useDateRange,
-                dateFrom: $dateFrom,
-                dateTo: $dateTo,
-                minAmountText: $minAmountText,
-                maxAmountText: $maxAmountText,
-                selectedPaymentMethods: $selectedPaymentMethods  // ← جدید
-            )
-        }
-        
     }
     
     // MARK: - Helper Views
@@ -4562,54 +3473,7 @@ private struct SettingsView: View {
                         }
                     }
                     
-                    // About
-                    DS.Card {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(L10n.t("settings.about"))
-                                .font(DS.Typography.section)
-                                .foregroundStyle(DS.Colors.text)
-                            
-                            Text(L10n.t("settings.about_desc"))
-                                .font(DS.Typography.body)
-                                .foregroundStyle(DS.Colors.subtext)
-                            
-                            Divider().overlay(DS.Colors.grid)
-                            
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Image(systemName: "star.fill")
-                                        .foregroundStyle(Color(hex: 0x667EEA))
-                                    Text(L10n.t("settings.feature_privacy"))
-                                        .font(DS.Typography.caption)
-                                        .foregroundStyle(DS.Colors.text)
-                                }
-                                
-                                HStack {
-                                    Image(systemName: "chart.line.uptrend.xyaxis")
-                                        .foregroundStyle(Color(hex: 0x667EEA))
-                                    Text(L10n.t("settings.feature_insights"))
-                                        .font(DS.Typography.caption)
-                                        .foregroundStyle(DS.Colors.text)
-                                }
-                                
-                                HStack {
-                                    Image(systemName: "sparkles")
-                                        .foregroundStyle(Color(hex: 0x667EEA))
-                                    Text(L10n.t("settings.feature_ai"))
-                                        .font(DS.Typography.caption)
-                                        .foregroundStyle(DS.Colors.text)
-                                }
-                                
-                                HStack {
-                                    Image(systemName: "arrow.down.doc")
-                                        .foregroundStyle(Color(hex: 0x667EEA))
-                                    Text(L10n.t("settings.feature_import"))
-                                        .font(DS.Typography.caption)
-                                        .foregroundStyle(DS.Colors.text)
-                                }
-                            }
-                        }
-                    }
+                    aboutCard
                     
                     // Legal & Support
                     DS.Card {
@@ -4759,6 +3623,39 @@ private struct SettingsView: View {
             return "U"
         }
         return String(email.prefix(1)).uppercased()
+    }
+
+    private var aboutCard: some View {
+        DS.Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.t("settings.about"))
+                    .font(DS.Typography.section)
+                    .foregroundStyle(DS.Colors.text)
+                
+                Text(L10n.t("settings.about_desc"))
+                    .font(DS.Typography.body)
+                    .foregroundStyle(DS.Colors.subtext)
+                
+                Divider().overlay(DS.Colors.grid)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    featureRow(icon: "star.fill", text: L10n.t("settings.feature_privacy"))
+                    featureRow(icon: "chart.line.uptrend.xyaxis", text: L10n.t("settings.feature_insights"))
+                    featureRow(icon: "sparkles", text: L10n.t("settings.feature_ai"))
+                    featureRow(icon: "arrow.down.doc", text: L10n.t("settings.feature_import"))
+                }
+            }
+        }
+    }
+
+    private func featureRow(icon: String, text: String) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .foregroundStyle(Color(hex: 0x667EEA))
+            Text(text)
+                .font(DS.Typography.caption)
+                .foregroundStyle(DS.Colors.text)
+        }
     }
 }
 
@@ -5608,9 +4505,7 @@ private struct TransactionRow: View {
                     .fill(t.category.tint.opacity(0.18))
                     .frame(width: 36, height: 36)
                     .overlay(
-                        Image(systemName: t.category.icon)
-                            .foregroundStyle(t.category.tint)
-                            .font(.system(size: 14, weight: .semibold))
+                        categoryIcon
                     )
 
                 // 📎 Badge اگر attachment وجود دارد
@@ -5683,6 +4578,12 @@ private struct TransactionRow: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var categoryIcon: some View {
+        Image(systemName: t.category.icon)
+            .foregroundStyle(t.category.tint)
+            .font(.system(size: 14, weight: .semibold))
     }
 }
 
@@ -8226,8 +7127,9 @@ enum Analytics {
             let low = s[min(max(0, lowIdx), n - 1)]
             let high = s[min(max(0, highIdx), n - 1)]
 
-            let clampedSum = xs.reduce(0) { acc, v in
-                acc + min(max(v, low), high)
+            let clampedSum = xs.reduce(0) { (acc: Int, v: Int) -> Int in
+                let clampedValue = min(max(v, low), high)
+                return acc + clampedValue
             }
             return Double(clampedSum) / Double(n)
         }
