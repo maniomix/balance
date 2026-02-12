@@ -17,20 +17,12 @@ struct ContentView: View {
     @State private var store: Store = Store()
     @State private var selectedTab: Tab = .dashboard
     @State private var showLaunchScreen = true
-    @AppStorage("app.language") private var appLanguage: String = "en"
+    @AppStorage("app.theme") private var selectedTheme: String = "dark"
     @State private var uiRefreshID = UUID()
     @EnvironmentObject private var authManager: AuthManager
     @StateObject private var firestoreManager = FirestoreManager()
 
     @Environment(\.scenePhase) private var scenePhase
-
-    // Debounced persistence
-    @State private var saveWorkItem: DispatchWorkItem? = nil
-
-    // Failsafe autosave (covers cases where Store is a reference type and onChange(of: store) won't fire)
-    @State private var lastAutoSave: Date = .distantPast
-    private let autosaveIntervalSeconds: TimeInterval = 3.0
-    private let autosaveTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     // Debounced smart-rule evaluation to prevent repeated scheduling/firing
     @State private var notifEvalWorkItem: DispatchWorkItem? = nil
@@ -39,31 +31,15 @@ struct ContentView: View {
     @AppStorage("notifications.enabled")
     private var notificationsEnabled: Bool = false
 
-    private let saveDebounceSeconds: TimeInterval = 0.6
     private let notifEvalDebounceSeconds: TimeInterval = 0.9
     
     // MARK: - Helper Functions
     
-    /// Save store to both local and cloud (user-specific)
+    /// Save store to local only
     private func saveStore() {
         guard let userId = authManager.currentUser?.uid else { return }
-        
         // Save locally with user ID
         store.save(userId: userId)
-        
-        // Debounced save to cloud
-        saveWorkItem?.cancel()
-        let task = DispatchWorkItem {
-            Task {
-                do {
-                    try await firestoreManager.saveStore(store, userId: userId)
-                } catch {
-                    print("❌ Error saving to cloud: \(error)")
-                }
-            }
-        }
-        saveWorkItem = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + saveDebounceSeconds, execute: task)
     }
 
     var body: some View {
@@ -120,26 +96,29 @@ struct ContentView: View {
                     
                     TabView(selection: $selectedTab){
                 DashboardView(store: $store, goToBudget: { selectedTab = .budget })
-                    .tabItem { Label(L10n.t("tab.dashboard"), systemImage: "gauge.with.dots.needle.50percent") }
+                    .tabItem { Label("Dashboard", systemImage: "gauge.with.dots.needle.50percent") }
                     .tag(Tab.dashboard)
 
                 TransactionsView(store: $store, goToBudget: { selectedTab = .budget })
-                    .tabItem { Label(L10n.t("tab.transactions"), systemImage: "list.bullet.rectangle") }
+                    .tabItem { Label("Transactions", systemImage: "list.bullet.rectangle") }
                     .tag(Tab.transactions)
 
                 BudgetView(store: $store)
-                    .tabItem { Label(L10n.t("tab.budget"), systemImage: "target") }
+                    .tabItem { Label("Budget", systemImage: "target") }
                     .tag(Tab.budget)
 
                 InsightsView(store: $store, goToBudget: { selectedTab = .budget })
-                    .tabItem { Label(L10n.t("tab.insights"), systemImage: "sparkles") }
+                    .tabItem { Label("Insights", systemImage: "sparkles") }
                     .tag(Tab.insights)
 
                 SettingsView(store: $store)
-                    .tabItem { Label(L10n.t("tab.settings"), systemImage: "gearshape") }
+                    .tabItem { Label("Settings", systemImage: "gearshape") }
                     .tag(Tab.settings)
             }
             .environmentObject(firestoreManager)
+            .onChange(of: selectedTab) { _, _ in
+                Haptics.selection()
+            }
             } // Close VStack
             .onAppear {
                 // اجازه بده نوتیف‌ها داخل برنامه هم بنر بشن
@@ -169,37 +148,15 @@ struct ContentView: View {
                 notifEvalWorkItem = item
                 DispatchQueue.main.asyncAfter(deadline: .now() + notifEvalDebounceSeconds, execute: item)
             }
-            .onChange(of: store) { _, newValue in
-                // Debounce saves to avoid writing on every keystroke / UI state change.
-                saveWorkItem?.cancel()
-                let item = DispatchWorkItem {
-                    newValue.save()
-                }
-                saveWorkItem = item
-                DispatchQueue.main.asyncAfter(deadline: .now() + saveDebounceSeconds, execute: item)
-            }
-            // Failsafe periodic autosave (handles reference-type Store mutations that don't trigger onChange(of: store))
-            .onReceive(autosaveTimer) { _ in
-                let now = Date()
-                guard now.timeIntervalSince(lastAutoSave) >= autosaveIntervalSeconds else { return }
-                // Only autosave when the launch screen is gone (avoid saving during initial load)
-                guard showLaunchScreen == false else { return }
-                saveStore()
-                lastAutoSave = now
-            }
-            // Ensure we save when the app is backgrounded / suspended
+            // Save locally when the app is backgrounded
             .onChange(of: scenePhase) { _, phase in
                 if phase == .inactive || phase == .background {
                     saveStore()
-                    lastAutoSave = Date()
                 }
             }
             .tint(DS.Colors.accent)
             .id(uiRefreshID)
-            .onChange(of: appLanguage) { _, _ in
-                // Force entire UI refresh when language changes
-                uiRefreshID = UUID()
-            }
+        
             .task(id: authManager.isAuthenticated) {
                 if authManager.isAuthenticated, let userId = authManager.currentUser?.uid {
                     // Sync when user logs in
@@ -217,10 +174,10 @@ struct ContentView: View {
                 }
             }
             .task {
-                // Check and process recurring transactions daily
-                if authManager.isAuthenticated {
-                    RecurringTransactionManager.processRecurringTransactions(store: &store)
-                }
+                // COMMENTED OUT - recurring transactions باگ داره
+                // if authManager.isAuthenticated {
+                //     RecurringTransactionManager.processRecurringTransactions(store: &store)
+                // }
             }
         }
     }
@@ -282,31 +239,48 @@ enum ImportDeduper {
 // MARK: - Haptics
 
 enum Haptics {
+    private static var isEnabled: Bool {
+        // Default is true if not set yet
+        if UserDefaults.standard.object(forKey: "app.hapticFeedback") == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: "app.hapticFeedback")
+    }
+    
     static func light() {
+        guard isEnabled else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
     static func medium() {
+        guard isEnabled else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
     static func heavy() {
+        guard isEnabled else { return }
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
     }
     static func soft() {
+        guard isEnabled else { return }
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
     }
     static func rigid() {
+        guard isEnabled else { return }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
     }
     static func selection() {
+        guard isEnabled else { return }
         UISelectionFeedbackGenerator().selectionChanged()
     }
     static func success() {
+        guard isEnabled else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
     static func warning() {
+        guard isEnabled else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
     static func error() {
+        guard isEnabled else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.error)
     }
     
@@ -384,6 +358,7 @@ enum Haptics {
         }
     }
 }
+
 
 
 // MARK: - PDF Exporter
@@ -571,8 +546,8 @@ private struct LaunchScreenView: View {
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color(hex: 0x667EEA).opacity(0.15),
-                            Color(hex: 0x764BA2).opacity(0.08),
+                            Color(hexValue: 0x667EEA).opacity(0.15),
+                            Color(hexValue: 0x764BA2).opacity(0.08),
                             Color.clear
                         ],
                         center: .center,
@@ -594,8 +569,8 @@ private struct LaunchScreenView: View {
                     .foregroundStyle(
                         LinearGradient(
                             colors: [
-                                Color(hex: 0x667EEA),
-                                Color(hex: 0x96a8fa)
+                                Color(hexValue: 0x667EEA),
+                                Color(hexValue: 0x96a8fa)
                             ],
                             startPoint: .leading,
                             endPoint: .trailing
@@ -709,7 +684,7 @@ private struct DashboardView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 24)
             }
-            .navigationTitle(L10n.t("dashboard.title"))
+            .navigationTitle("Dashboard")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // 🔴 دکمه حذف کل ماه (سمت چپ)
@@ -760,8 +735,8 @@ private struct DashboardView: View {
                 }
             }
         }
-        .alert(L10n.t("dashboard.delete_month"), isPresented: $showDeleteMonthConfirm) {
-            Button(L10n.t("common.delete"), role: .destructive) {
+        .alert("Delete This Month", isPresented: $showDeleteMonthConfirm) {
+            Button("Delete", role: .destructive) {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
                     store.clearMonthData(for: store.selectedMonth)
                 }
@@ -781,9 +756,9 @@ private struct DashboardView: View {
 
             Button("common.cancel", role: .cancel) {}
         } message: {
-            Text(L10n.t("dashboard.delete_month_msg"))
+            Text("This will delete all transactions for this month. This action cannot be undone.")
         }
-        .alert(L10n.t("common.trash"), isPresented: $showTrashAlert) {
+        .alert("Trash", isPresented: $showTrashAlert) {
             Button("common.ok", role: .cancel) {}
         } message: {
             Text(trashAlertText)
@@ -809,7 +784,7 @@ private struct DashboardView: View {
                                 .font(DS.Typography.title)
                                 .foregroundStyle(DS.Colors.text)
                         }
-                        Text(L10n.t("dashboard.data_for_month"))
+                        Text("Data for month")
                             .font(DS.Typography.caption)
                             .foregroundStyle(DS.Colors.subtext)
                     }
@@ -840,12 +815,22 @@ private struct DashboardView: View {
         let summary = Analytics.monthSummary(store: store)
         let isOverBudget = summary.remaining < 0
         
+        // محاسبه income برای رنگ سبز
+        let tx = Analytics.monthTransactions(store: store)
+        let totalIncome = tx.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+        let hasSignificantIncome = totalIncome > store.budgetTotal * 10 / 100
+        
         return HStack(spacing: 12) {
-            KPI(title: L10n.t("kpi.spent"), value: DS.Format.money(summary.totalSpent), isNegative: false)
+            KPI(title: "Spent", value: DS.Format.money(summary.totalSpent), isNegative: false)
                 .frame(maxWidth: .infinity)
-            KPI(title: L10n.t("kpi.remaining"), value: DS.Format.money(summary.remaining), isNegative: isOverBudget)
+            KPI(
+                title: "Remaining",
+                value: DS.Format.money(summary.remaining),
+                isNegative: isOverBudget,
+                isPositive: !isOverBudget && hasSignificantIncome
+            )
                 .frame(maxWidth: .infinity)
-            KPI(title: L10n.t("kpi.daily_avg"), value: DS.Format.money(summary.dailyAvg), isNegative: false)
+            KPI(title: "Daily avg", value: DS.Format.money(summary.dailyAvg), isNegative: false)
                 .frame(maxWidth: .infinity)
         }
     }
@@ -856,12 +841,12 @@ private struct DashboardView: View {
         
         return DS.Card {
             VStack(alignment: .leading, spacing: 10) {
-                Text(L10n.t("dashboard.daily_trend"))
+                Text("Daily Trend")
                     .font(DS.Typography.section)
                     .foregroundStyle(DS.Colors.text)
 
                 if points.isEmpty {
-                    Text(L10n.t("dashboard.no_trend_data"))
+                    Text("Not enough data")
                         .font(DS.Typography.body)
                         .foregroundStyle(DS.Colors.subtext)
                         .padding(.vertical, 6)
@@ -905,7 +890,7 @@ private struct DashboardView: View {
                                 y: .value("Amount", p.amount)
                             )
                             .foregroundStyle(DS.Colors.accent)
-                            .symbolSize(30)  // ← کوچیک‌تر (قبلاً 80 بود)
+                            .symbolSize(30)
                         }
                     }
                     .chartXAxis {
@@ -1062,7 +1047,7 @@ private struct DashboardView: View {
         
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text(L10n.t("budget.spent"))
+                Text("Spent")
                     .font(DS.Typography.caption.weight(.semibold))
                     .foregroundStyle(DS.Colors.text)
                 Spacer()
@@ -1104,12 +1089,12 @@ private struct DashboardView: View {
 
         return DS.Card {
             VStack(alignment: .leading, spacing: 10) {
-                Text(L10n.t("dashboard.category_breakdown"))
+                Text("Category Breakdown")
                     .font(DS.Typography.section)
                     .foregroundStyle(DS.Colors.text)
 
                 if breakdown.isEmpty {
-                    Text(L10n.t("dashboard.category_breakdown_empty"))
+                    Text("No transactions yet")
                         .font(DS.Typography.body)
                         .foregroundStyle(DS.Colors.subtext)
                         .padding(.vertical, 6)
@@ -1122,7 +1107,7 @@ private struct DashboardView: View {
                         .cornerRadius(6)
                         .foregroundStyle(
                             LinearGradient(
-                                colors: [Color(hex: 0x0E0E10), Color.white],  // مشکی → سفید
+                                colors: [Color(hexValue: 0x0E0E10), Color.white],  // مشکی → سفید
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
@@ -1167,17 +1152,17 @@ private struct DashboardView: View {
         return DS.Card {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text(L10n.t("dashboard.payment_breakdown"))
+                    Text("Payment Breakdown")
                         .font(DS.Typography.section)
                         .foregroundStyle(DS.Colors.text)
                     Spacer()
-                    Text(L10n.t("dashboard.cash_vs_card"))
+                    Text("Cash vs Card")
                         .font(DS.Typography.caption)
                         .foregroundStyle(DS.Colors.subtext)
                 }
                 
                 if breakdown.isEmpty {
-                    Text(L10n.t("dashboard.no_payment_data"))
+                    Text("No payment data")
                         .font(DS.Typography.body)
                         .foregroundStyle(DS.Colors.subtext)
                         .padding(.vertical, 6)
@@ -1274,18 +1259,18 @@ private struct DashboardView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "lightbulb.fill")
                                 .font(.system(size: 14))
-                                .foregroundStyle(Color(hex: 0xFFD93D))
+                                .foregroundStyle(Color(hexValue: 0xFFD93D))
                             
                             if cashPercent > 70 {
-                                Text(L10n.t("dashboard.payment_insight_cash_heavy"))
+                                Text("You use cash a lot")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                             } else if cardPercent > 70 {
-                                Text(L10n.t("dashboard.payment_insight_card_heavy"))
+                                Text("You prefer card payments")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                             } else {
-                                Text(L10n.t("dashboard.payment_insight_balanced"))
+                                Text("Balanced payment methods")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                             }
@@ -1294,7 +1279,7 @@ private struct DashboardView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color(hex: 0xFFD93D).opacity(0.1))
+                                .fill(Color(hexValue: 0xFFD93D).opacity(0.1))
                         )
                     }
                 }
@@ -1307,17 +1292,17 @@ private struct DashboardView: View {
         return DS.Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(L10n.t("dashboard.advisor_insights"))
+                    Text("Advisor Insights")
                         .font(DS.Typography.section)
                         .foregroundStyle(DS.Colors.text)
                     Spacer()
-                    Text(L10n.t("dashboard.honest_no_blame"))
+                    Text("We're here to help, not judge")
                         .font(DS.Typography.caption)
                         .foregroundStyle(DS.Colors.subtext)
                 }
 
                 if insights.isEmpty {
-                    Text(L10n.t("dashboard.add_expenses"))
+                    Text("Add your expenses to get started")
                         .font(DS.Typography.body)
                         .foregroundStyle(DS.Colors.subtext)
                         .padding(.vertical, 6)
@@ -1339,11 +1324,11 @@ private struct SetupCard: View {
     var body: some View {
         DS.Card {
             VStack(alignment: .leading, spacing: 10) {
-                Text(L10n.t("dashboard.step1_title"))
+                Text("Set Your Budget")
                     .font(DS.Typography.section)
                     .foregroundStyle(DS.Colors.text)
 
-                Text(L10n.t("dashboard.step1_desc"))
+                Text("Start by setting a monthly budget")
                     .font(DS.Typography.body)
                     .foregroundStyle(DS.Colors.subtext)
 
@@ -1352,7 +1337,7 @@ private struct SetupCard: View {
                 } label: {
                     HStack {
                         Image(systemName: "target")
-                        Text(L10n.t("dashboard.go_to_budget"))
+                        Text("Go to Budget")
                     }
                 }
                 .buttonStyle(DS.PrimaryButton())
@@ -1370,7 +1355,7 @@ private struct TransactionsView: View {
     @State private var viewingAttachment: Transaction? = nil
     @State private var inspectingTransaction: Transaction? = nil  // ← جدید
     @State private var showAdd = false
-    @State private var showRecurring = false  // ← جدید
+    // @State private var showRecurring = false  // ← COMMENTED OUT - باگ داره
     @State private var search = ""
     @State private var searchScope: SearchScope = .thisMonth  // ← جدید
     @State private var showFilters = false
@@ -1514,9 +1499,9 @@ private struct TransactionsView: View {
     var body: some View {
         NavigationStack {
             transactionsContent
-                .navigationTitle(L10n.t("transactions.title"))
+                .navigationTitle("Transactions")
                 .toolbar { toolbarItems }
-                .searchable(text: $search, prompt: L10n.t("transactions.search_placeholder"))
+                .searchable(text: $search, prompt: "Search transactions")
                 .confirmationDialog(
                     "Delete \(selectedTxIDs.count) transactions?",
                     isPresented: isBulkDeleteDialogPresented,
@@ -1535,15 +1520,17 @@ private struct TransactionsView: View {
                         selectedCategories = Set(store.allCategories)
                     }
                 }
+                .onChange(of: store.allCategories.count) { _ in
+                    // Update selectedCategories when new categories are added
+                    selectedCategories = Set(store.allCategories)
+                }
                 .sheet(isPresented: $showAdd) {
                     AddTransactionSheet(store: $store, initialMonth: store.selectedMonth)
                         .presentationDetents([.medium, .large])
                         .presentationDragIndicator(.visible)
                 }
-                .sheet(item: editingWrapper) { wrapper in
+                .fullScreenCover(item: editingWrapper) { wrapper in
                     EditTransactionSheet(store: $store, transactionID: wrapper.id)
-                        .presentationDetents([.medium, .large])
-                        .presentationDragIndicator(.visible)
                 }
                 .sheet(item: Binding(
                     get: { viewingAttachment },
@@ -1559,9 +1546,10 @@ private struct TransactionsView: View {
                 )) { transaction in
                     TransactionInspectSheet(transaction: transaction, store: $store)
                 }
-                .sheet(isPresented: $showRecurring) {
-                    RecurringTransactionsView(store: $store)
-                }
+                // COMMENTED OUT - recurring transactions باگ داره
+                // .sheet(isPresented: $showRecurring) {
+                //     AddRecurringSheet(store: $store)
+                // }
                 .fullScreenCover(isPresented: $showFilters) {
                     TransactionsFilterSheet(
                         selectedCategories: $selectedCategories,
@@ -1591,7 +1579,7 @@ private struct TransactionsView: View {
 
     @ViewBuilder
     private var bulkDeleteActions: some View {
-        Button(L10n.t("common.delete"), role: .destructive) {
+        Button("Delete", role: .destructive) {
             let ids = selectedTxIDs
             pendingUndo = store.transactions.filter { ids.contains($0.id) }
             showBulkDeletePopover = false
@@ -1620,11 +1608,11 @@ private struct TransactionsView: View {
             VStack(spacing: 14) {
                 DS.Card {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.t("transactions.before_add"))
+                        Text("Before you add transactions")
                             .font(DS.Typography.section)
                             .foregroundStyle(DS.Colors.text)
 
-                        Text(L10n.t("transactions.set_budget_first"))
+                        Text("Set your budget first")
                             .font(DS.Typography.body)
                             .foregroundStyle(DS.Colors.subtext)
 
@@ -1633,7 +1621,7 @@ private struct TransactionsView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "target")
-                                Text(L10n.t("transactions.set_budget_btn"))
+                                Text("Set Budget")
                             }
                         }
                         .buttonStyle(DS.PrimaryButton())
@@ -1670,7 +1658,7 @@ private struct TransactionsView: View {
         ) {
             deleteDialogButtons
         } message: {
-            Text(L10n.t("transactions.cannot_undo"))
+            Text("This action cannot be undone")
         }
         .safeAreaInset(edge: .bottom) {
             if showUndoBar {
@@ -1681,10 +1669,10 @@ private struct TransactionsView: View {
     
     private var emptyStateView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(L10n.t("transactions.no_transactions"))
+            Text("No transactions yet")
                 .font(DS.Typography.section)
                 .foregroundStyle(DS.Colors.text)
-            Text(L10n.t("transactions.start_simple"))
+            Text("Tap + to get started")
                 .font(DS.Typography.body)
                 .foregroundStyle(DS.Colors.subtext)
         }
@@ -1768,6 +1756,13 @@ private struct TransactionsView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .transition(.opacity.combined(with: .move(edge: .trailing)))
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                pendingDeleteID = t.id
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
         .contextMenu {
             contextMenuButtons(for: t)
         } preview: {
@@ -1797,7 +1792,7 @@ private struct TransactionsView: View {
             Button {
                 viewingAttachment = t
             } label: {
-                Label(L10n.t("transactions.view_attachment"), systemImage: "paperclip")
+                Label("View Attachment", systemImage: "paperclip")
             }
         }
         
@@ -1806,19 +1801,19 @@ private struct TransactionsView: View {
                 editingTxID = t.id
             }
         } label: {
-            Label(L10n.t("transactions.edit"), systemImage: "pencil")
+            Label("Edit", systemImage: "pencil")
         }
 
         Button(role: .destructive) {
             pendingDeleteID = t.id
         } label: {
-            Label(L10n.t("common.delete"), systemImage: "trash")
+            Label("Delete", systemImage: "trash")
         }
     }
     
     @ViewBuilder
     private var deleteDialogButtons: some View {
-        Button(L10n.t("common.delete"), role: .destructive) {
+        Button("Delete", role: .destructive) {
             let id = pendingDeleteID
             pendingDeleteID = nil
 
@@ -1895,14 +1890,14 @@ private struct TransactionsView: View {
     @ViewBuilder
     private var leadingToolbar: some View {
         if isSelecting {
-            Button(L10n.t("common.cancel")) {
+            Button("Cancel") {
                 isSelecting = false
                 selectedTxIDs.removeAll()
                 showBulkDeletePopover = false
             }
             .foregroundStyle(DS.Colors.subtext)
 
-            Button(L10n.t("common.delete")) {
+            Button("Delete") {
                 guard !selectedTxIDs.isEmpty else { return }
                 showBulkDeletePopover = true
             }
@@ -1910,7 +1905,7 @@ private struct TransactionsView: View {
             .foregroundStyle(DS.Colors.danger)
             .disabled(selectedTxIDs.isEmpty)
         } else {
-            Button(L10n.t("transactions.select")) {
+            Button("Select") {
                 isSelecting = true
                 Haptics.selection()
             }
@@ -1921,7 +1916,7 @@ private struct TransactionsView: View {
     @ViewBuilder
     private var trailingToolbar: some View {
         if isSelecting {
-            Button(L10n.t("transactions.select_all")) {
+            Button("Select All") {
                 selectedTxIDs = Set(filtered.map { $0.id })
                 Haptics.selection()
             }
@@ -1931,9 +1926,9 @@ private struct TransactionsView: View {
                 filtersActive: activeFilterCount > 0,
                 showImport: $showImport,
                 showFilters: $showFilters,
-                showAdd: $showAdd,
-                showRecurring: $showRecurring,  // ← جدید
-                disabled: store.budgetTotal <= 0,
+                showAdd: $showAdd
+                // showRecurring: $showRecurring,  // ← COMMENTED OUT - باگ داره
+                , disabled: store.budgetTotal <= 0,
                 uiAnim: uiAnim
             )
             .padding(.trailing, 6)
@@ -1956,23 +1951,23 @@ private struct TransactionsTrailingButtons: View {
     @Binding var showImport: Bool
     @Binding var showFilters: Bool
     @Binding var showAdd: Bool
-    @Binding var showRecurring: Bool  // ← جدید
+    // @Binding var showRecurring: Bool  // ← COMMENTED OUT - باگ داره
     let disabled: Bool
     let uiAnim: Animation
 
     var body: some View {
         HStack(spacing: 12) {
-            // Recurring button
-            Button {
-                Haptics.light()
-                showRecurring = true
-            } label: {
-                Image(systemName: "repeat.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(DS.Colors.text)
-                    .frame(width: 36, height: 36)
-            }
-            .buttonStyle(.plain)
+            // COMMENTED OUT - Recurring button - باگ داره
+            // Button {
+            //     Haptics.light()
+            //     showRecurring = true
+            // } label: {
+            //     Image(systemName: "repeat.circle")
+            //         .font(.system(size: 16, weight: .semibold))
+            //         .foregroundStyle(DS.Colors.text)
+            //         .frame(width: 36, height: 36)
+            // }
+            //.buttonStyle(.plain)
             
             Button { showImport = true } label: {
                 Image(systemName: "square.and.arrow.down")
@@ -2050,7 +2045,7 @@ private struct TransactionsFilterSheet: View {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
-                                    Text(L10n.t("filters.categories"))
+                                    Text("Categories")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
                                     Spacer()
@@ -2106,7 +2101,7 @@ private struct TransactionsFilterSheet: View {
                                 }
 
                                 if selectedCategories.isEmpty {
-                                    Text(L10n.t("filters.tip_one_category"))
+                                    Text("Select at least one category")
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                 }
@@ -2116,7 +2111,7 @@ private struct TransactionsFilterSheet: View {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
-                                    Text(L10n.t("filters.payment_methods"))
+                                    Text("Payment Methods")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
                                     Spacer()
@@ -2196,7 +2191,7 @@ private struct TransactionsFilterSheet: View {
                                 }
 
                                 if selectedPaymentMethods.isEmpty {
-                                    Text(L10n.t("filters.tip_one_payment_method"))
+                                    Text("Select at least one payment method")
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                 }
@@ -2206,7 +2201,7 @@ private struct TransactionsFilterSheet: View {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
-                                    Text(L10n.t("filters.date_range"))
+                                    Text("Date Range")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
                                     Spacer()
@@ -2215,7 +2210,7 @@ private struct TransactionsFilterSheet: View {
                                             withAnimation(uiAnim) { }
                                         }
                                         .labelsHidden()
-                                        .toggleStyle(SwitchToggleStyle(tint: Color(hex: 0x3A3A3C)))
+                                        .toggleStyle(SwitchToggleStyle(tint: Color(hexValue: 0x3A3A3C)))
                                         .animation(uiAnim, value: useDateRange)
                                 }
                                 .padding(8)
@@ -2227,7 +2222,7 @@ private struct TransactionsFilterSheet: View {
                                 if useDateRange {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 6) {
-                                            Text(L10n.t("filters.from"))
+                                            Text("From")
                                                 .font(DS.Typography.caption)
                                                 .foregroundStyle(DS.Colors.subtext)
                                             DatePicker("", selection: $dateFrom, displayedComponents: [.date])
@@ -2235,7 +2230,7 @@ private struct TransactionsFilterSheet: View {
                                         }
                                         Spacer()
                                         VStack(alignment: .leading, spacing: 6) {
-                                            Text(L10n.t("filters.to"))
+                                            Text("To")
                                                 .font(DS.Typography.caption)
                                                 .foregroundStyle(DS.Colors.subtext)
                                             DatePicker("", selection: $dateTo, displayedComponents: [.date])
@@ -2244,7 +2239,7 @@ private struct TransactionsFilterSheet: View {
                                     }
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                                 } else {
-                                    Text(L10n.t("filters.date_range_off"))
+                                    Text("Date range filtering is off")
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                         .transition(.opacity)
@@ -2254,13 +2249,13 @@ private struct TransactionsFilterSheet: View {
 
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text(L10n.t("filters.amount_range"))
+                                Text("Amount Range")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
 
                                 HStack(spacing: 10) {
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Text(L10n.t("filters.min"))
+                                        Text("Min")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
                                         TextField("0.00", text: $minAmountText)
@@ -2275,7 +2270,7 @@ private struct TransactionsFilterSheet: View {
                                     }
 
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Text(L10n.t("filters.max"))
+                                        Text("Max")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
                                         TextField("0.00", text: $maxAmountText)
@@ -2290,7 +2285,7 @@ private struct TransactionsFilterSheet: View {
                                     }
                                 }
 
-                                Text(L10n.t("filters.amount_example"))
+                                Text("Example: 0 - 100")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                             }
@@ -2311,7 +2306,7 @@ private struct TransactionsFilterSheet: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "arrow.counterclockwise")
-                                    Text(L10n.t("filters.reset"))
+                                    Text("Reset")
                                 }
                             }
                             .buttonStyle(DS.PrimaryButton())
@@ -2321,7 +2316,7 @@ private struct TransactionsFilterSheet: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "checkmark.circle.fill")
-                                    Text(L10n.t("filters.apply"))
+                                    Text("Apply")
                                 }
                             }
                             .buttonStyle(DS.PrimaryButton())
@@ -2353,6 +2348,8 @@ private struct BudgetView: View {
 
     @State private var editingTotal = ""
     @State private var editingCategoryBudgets: [Category: String] = [:]
+    @State private var showAddCategory = false
+    @State private var newCategoryName = ""
     @FocusState private var focus: Bool
 
     var body: some View {
@@ -2361,11 +2358,11 @@ private struct BudgetView: View {
                 VStack(spacing: 14) {
                     DS.Card {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(L10n.t("budget.set_monthly"))
+                            Text("Set Monthly Budget")
                                 .font(DS.Typography.section)
                                 .foregroundStyle(DS.Colors.text)
 
-                            Text(L10n.t("budget.keep_realistic"))
+                            Text("Keep it realistic")
                                 .font(DS.Typography.body)
                                 .foregroundStyle(DS.Colors.subtext)
 
@@ -2384,6 +2381,7 @@ private struct BudgetView: View {
                                     )
 
                                 Button(store.budgetTotal <= 0 ? "Start" : "Update") {
+                        
                                     let v = DS.Format.cents(from: editingTotal)
                                     store.budgetTotal = max(0, v)
                                     focus = false
@@ -2394,14 +2392,14 @@ private struct BudgetView: View {
 
                             if store.budgetTotal <= 0 {
                                 DS.StatusLine(
-                                    title: L10n.t("status.analysis_paused"),
-                                    detail: L10n.t("status.analysis_paused_desc"),
+                                    title: "Analysis Paused",
+                                    detail: "Set a budget to see insights",
                                     level: .watch
                                 )
                             } else {
                                 DS.StatusLine(
-                                    title: L10n.t("status.budget_set"),
-                                    detail: L10n.t("status.budget_set_desc"),
+                                    title: "Budget Set",
+                                    detail: "You're ready to track",
                                     level: .ok
                                 )
                             }
@@ -2412,7 +2410,7 @@ private struct BudgetView: View {
                         DS.Card {
                             let summary = Analytics.monthSummary(store: store)
                             VStack(alignment: .leading, spacing: 10) {
-                                Text(L10n.t("month.this_month"))
+                                Text("This month")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
 
@@ -2427,7 +2425,7 @@ private struct BudgetView: View {
 
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(L10n.t("budget.spent"))
+                                        Text("Spent")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
                                         Text(DS.Format.money(summary.totalSpent))
@@ -2436,58 +2434,50 @@ private struct BudgetView: View {
                                     }
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 4) {
-                                        Text(L10n.t("budget.remaining"))
-                                            .font(DS.Typography.caption)
-                                            .foregroundStyle(DS.Colors.subtext)
+                                        HStack(spacing: 4) {
+                                            Text("Remaining")
+                                                .font(DS.Typography.caption)
+                                                .foregroundStyle(DS.Colors.subtext)
+                                            
+                                            // اگر income زیادی داشتیم که باعث شد remaining بالا بره
+                                            let tx = Analytics.monthTransactions(store: store)
+                                            let totalIncome = tx.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+                                            if totalIncome > 0 && summary.remaining > store.budgetTotal {
+                                                Text("(+income)")
+                                                    .font(.system(size: 10, weight: .medium))
+                                                    .foregroundStyle(Color.green.opacity(0.8))
+                                            }
+                                        }
+                                        
+                                        let tx = Analytics.monthTransactions(store: store)
+                                        let totalIncome = tx.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+                                        let hasSignificantIncome = totalIncome > store.budgetTotal * 10 / 100 // اگر income بیشتر از 10% budget بود
+                                        
                                         Text(DS.Format.money(summary.remaining))
                                             .font(DS.Typography.number)
-                                            .foregroundStyle(summary.remaining >= 0 ? DS.Colors.text : DS.Colors.danger)
-                                    }
-                                }
-
-                                // Saved metrics (shown below the main row)
-                                Divider().overlay(DS.Colors.grid)
-
-                                VStack(alignment: .leading, spacing: 6) {
-                                    let delta = store.savedDeltaVsPreviousMonth(for: store.selectedMonth)
-                                    let isNegative = delta < 0
-
-                                    HStack {
-                                        Text("Saved vs last month")
-                                            .font(DS.Typography.caption)
-                                            .foregroundStyle(DS.Colors.subtext)
-                                        Spacer()
-                                        Text("\(delta >= 0 ? "+" : "")\(DS.Format.money(delta))")
-                                            .font(DS.Typography.caption)
-                                            .foregroundStyle(isNegative ? DS.Colors.danger : DS.Colors.positive)
-                                    }
-
-                                    HStack {
-                                        Text("Total saved so far")
-                                            .font(DS.Typography.caption)
-                                            .foregroundStyle(DS.Colors.subtext)
-                                        Spacer()
-                                        Text(DS.Format.money(store.totalSaved))
-                                            .font(DS.Typography.caption)
-                                            .foregroundStyle(store.totalSaved < 0 ? DS.Colors.danger : DS.Colors.positive)
+                                            .foregroundStyle(
+                                                hasSignificantIncome && summary.remaining > 0 ?
+                                                Color.green :
+                                                (summary.remaining >= 0 ? DS.Colors.text : DS.Colors.danger)
+                                            )
                                     }
                                 }
                             }
                         }
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text(L10n.t("budget.category_budgets"))
+                                Text("Category Budgets")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
 
-                                Text(L10n.t("budget.category_caps_desc"))
+                                Text("Set spending limits per category")
                                     .font(DS.Typography.body)
                                     .foregroundStyle(DS.Colors.subtext)
 
                                 Divider().overlay(DS.Colors.grid)
 
                                 VStack(spacing: 10) {
-                                    ForEach(categories, id: \.self) { c in
+                                    ForEach(store.allCategories, id: \.self) { c in
                                         HStack(spacing: 10) {
                                             HStack(spacing: 8) {
                                                 Circle()
@@ -2525,7 +2515,42 @@ private struct BudgetView: View {
                                                     .stroke(DS.Colors.grid, lineWidth: 1)
                                             )
                                         }
+                                        .contextMenu {
+                                            if case .custom(let name) = c {
+                                                Button(role: .destructive) {
+                                                    withAnimation {
+                                                        store.deleteCustomCategory(name: name)
+                                                        editingCategoryBudgets.removeValue(forKey: c)
+                                                    }
+                                                    Haptics.medium()
+                                                } label: {
+                                                    Label("Delete Category", systemImage: "trash")
+                                                }
+                                            }
+                                        }
                                     }
+                                    
+                                    // Add Category Button
+                                    Button {
+                                        showAddCategory = true
+                                        Haptics.medium()
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: "plus.circle.fill")
+                                                .foregroundStyle(DS.Colors.accent)
+                                            Text("Add Custom Category")
+                                                .foregroundStyle(DS.Colors.text)
+                                        }
+                                        .font(DS.Typography.body)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(DS.Colors.grid, lineWidth: 1, antialiased: true)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
                                 }
 
                                 Divider().overlay(DS.Colors.grid)
@@ -2535,7 +2560,7 @@ private struct BudgetView: View {
 
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(L10n.t("budget.allocated"))
+                                        Text("Allocated")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
                                         Text(DS.Format.money(allocated))
@@ -2544,7 +2569,7 @@ private struct BudgetView: View {
                                     }
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 4) {
-                                        Text(L10n.t("budget.unallocated"))
+                                        Text("Unallocated")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
                                         Text(DS.Format.money(remainingToAllocate))
@@ -2568,7 +2593,19 @@ private struct BudgetView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 24)
             }
-            .navigationTitle(L10n.t("budget.this_month"))
+            .navigationTitle("Budget")
+            .alert("New Category", isPresented: $showAddCategory) {
+                TextField("Category name", text: $newCategoryName)
+                Button("Cancel", role: .cancel) {
+                    newCategoryName = ""
+                }
+                Button("Add") {
+                    store.addCustomCategory(name: newCategoryName)
+                    newCategoryName = ""
+                }
+            } message: {
+                Text("Enter category name")
+            }
             .onAppear {
                 editingTotal = store.budgetTotal > 0
                     ? String(format: "%.2f", Double(store.budgetTotal) / 100.0)
@@ -2610,18 +2647,18 @@ private struct InsightsView: View {
                     if store.budgetTotal <= 0 {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text(L10n.t("insights.not_ready"))
+                                Text("Insights Not Ready")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
 
-                                Text(L10n.t("insights.set_budget_first"))
+                                Text("Set your budget first")
                                     .font(DS.Typography.body)
                                     .foregroundStyle(DS.Colors.subtext)
 
                                 Button { goToBudget() } label: {
                                     HStack {
                                         Image(systemName: "target")
-                                        Text(L10n.t("transactions.set_budget_btn"))
+                                        Text("Set Budget")
                                     }
                                 }
                                 .buttonStyle(DS.PrimaryButton())
@@ -2630,7 +2667,7 @@ private struct InsightsView: View {
                     } else {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text(L10n.t("insights.analytical_report"))
+                                Text("Analytical Report")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
 
@@ -2650,7 +2687,7 @@ private struct InsightsView: View {
                                     detail: detail,
                                     level: proj.level
                                 )
-                                Text(L10n.t("insights.projection_note"))
+                                Text("Based on current spending")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                             }
@@ -2664,7 +2701,7 @@ private struct InsightsView: View {
                                     .foregroundStyle(DS.Colors.text)
 
                                 if insights.isEmpty {
-                                    Text(L10n.t("insights.no_data"))
+                                    Text("Not enough data")
                                         .font(DS.Typography.body)
                                         .foregroundStyle(DS.Colors.subtext)
                                         .padding(.vertical, 6)
@@ -2681,16 +2718,16 @@ private struct InsightsView: View {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
-                                    Text(L10n.t("insights.notifications"))
+                                    Text("Notifications")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
                                     Spacer()
                                     Toggle("", isOn: $notificationsEnabled)
                                         .labelsHidden()
-                                        .toggleStyle(SwitchToggleStyle(tint: Color(hex: 0x3A3A3C)))
+                                        .toggleStyle(SwitchToggleStyle(tint: Color(hexValue: 0x3A3A3C)))
                                 }
 
-                                Text(L10n.t("insights.notifications_desc"))
+                                Text("Get alerts about your spending")
                                     .font(DS.Typography.body)
                                     .foregroundStyle(DS.Colors.subtext)
 
@@ -2707,13 +2744,13 @@ private struct InsightsView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "bell.badge")
-                                        Text(L10n.t("insights.send_test"))
+                                        Text("Send Test")
                                     }
                                 }
                                 .buttonStyle(DS.PrimaryButton())
                                 .disabled(!notificationsEnabled)
 
-                                Text(L10n.t("insights.test_tip"))
+                                Text("Make sure notifications work")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                             }
@@ -2724,16 +2761,16 @@ private struct InsightsView: View {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
-                                    Text(L10n.t("insights.export"))
+                                    Text("Export")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
                                     Spacer()
-                                    Text(L10n.t("insights.export_share"))
+                                    Text("Share or save")
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                 }
 
-                                Text(L10n.t("insights.export_desc"))
+                                Text("Export your data")
                                     .font(DS.Typography.body)
                                     .foregroundStyle(DS.Colors.subtext)
 
@@ -2744,7 +2781,7 @@ private struct InsightsView: View {
                                     } label: {
                                         HStack {
                                             Image(systemName: "tablecells")
-                                            Text(L10n.t("insights.export_excel"))
+                                            Text("Export Excel")
                                         }
                                     }
                                     .buttonStyle(DS.PrimaryButton())
@@ -2755,7 +2792,7 @@ private struct InsightsView: View {
                                     } label: {
                                         HStack {
                                             Image(systemName: "doc.plaintext")
-                                            Text(L10n.t("insights.export_csv"))
+                                            Text("Export CSV")
                                         }
                                     }
                                     .buttonStyle(DS.PrimaryButton())
@@ -2767,13 +2804,13 @@ private struct InsightsView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "doc.richtext")
-                                        Text(L10n.t("insights.export_pdf"))
+                                        Text("Export PDF")
                                     }
                                     .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(DS.PrimaryButton())
 
-                                Text(L10n.t("insights.export_tip"))
+                                Text("Choose format")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                             }
@@ -2788,7 +2825,7 @@ private struct InsightsView: View {
                                         .font(.system(size: 18))
                                         .foregroundStyle(DS.Colors.accent)
                                     
-                                    Text(L10n.t("charts.title"))
+                                    Text("Charts")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
                                 }
@@ -2812,21 +2849,77 @@ private struct InsightsView: View {
                         }
                         
                         
+                        // Professional Analysis Website
+                        DS.Card {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Image(systemName: "globe.badge.chevron.backward")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: [Color(hexValue: 0x667EEA), Color(hexValue: 0x764BA2)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                    
+                                    Text("Professional Analysis")
+                                        .font(DS.Typography.section)
+                                        .foregroundStyle(DS.Colors.text)
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chart.line.uptrend.xyaxis")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(DS.Colors.subtext)
+                                }
+                                
+                                Text("Deep dive into your financial data with advanced analytics and professional reports")
+                                    .font(DS.Typography.body)
+                                    .foregroundStyle(DS.Colors.subtext)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                
+                                // Features
+                                VStack(alignment: .leading, spacing: 8) {
+                                    FeatureBullet(icon: "chart.bar.doc.horizontal", text: "Comprehensive Reports")
+                                    FeatureBullet(icon: "calendar.badge.clock", text: "Historical Trends")
+                                    FeatureBullet(icon: "arrow.triangle.branch", text: "Spending Patterns")
+                                    FeatureBullet(icon: "lightbulb.max", text: "Smart Recommendations")
+                                }
+                                .padding(.vertical, 6)
+                                
+                                Button {
+                                    Haptics.light()
+                                    if let url = URL(string: "https://balance-analysis.com") {
+                                        // ← لینک رو بعداً عوض می‌کنی
+                                        UIApplication.shared.open(url)
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "arrow.up.forward.square")
+                                        Text("Open Analysis Dashboard")
+                                            .fontWeight(.semibold)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(DS.PrimaryButton())
+                            }
+                        }
                         
 
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
-                                    Text(L10n.t("insights.ai_analysis"))
+                                    Text("AI Analysis")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
                                     Spacer()
-                                    Text(L10n.t("insights.ai_powered"))
+                                    Text("AI Powered")
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                 }
 
-                                Text(L10n.t("insights.ai_desc"))
+                                Text("Get insights from AI")
                                     .font(DS.Typography.body)
                                     .foregroundStyle(DS.Colors.subtext)
 
@@ -2835,7 +2928,7 @@ private struct InsightsView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "wand.and.stars")
-                                        Text(L10n.t("insights.ai_analyze"))
+                                        Text("Analyze")
                                     }
                                 }
                                 .buttonStyle(DS.PrimaryButton())
@@ -2849,13 +2942,13 @@ private struct InsightsView: View {
 
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text(L10n.t("dashboard.quick_actions"))
+                                Text("Quick Actions")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
 
                                 let actions = Analytics.quickActions(store: store)
                                 if actions.isEmpty {
-                                    Text(L10n.t("dashboard.no_action_needed"))
+                                    Text("All good!")
                                         .font(DS.Typography.body)
                                         .foregroundStyle(DS.Colors.subtext)
                                         .padding(.vertical, 6)
@@ -2887,7 +2980,7 @@ private struct InsightsView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 24)
             }
-            .navigationTitle(L10n.t("tab.insights"))
+            .navigationTitle("Insights")
             .onChange(of: notificationsEnabled) { _, newVal in
                 if newVal {
                     Task {
@@ -3070,13 +3163,12 @@ private struct InsightsView: View {
                     daily: dailyPoints
                 )
             case .pdf:
-                data = PDFExporter.makePDF(
-                    monthKey: monthKey,
-                    currency: "EUR",
-                    summary: summary,
-                    transactions: tx,
-                    categories: cats
-                )
+                // PDF export redirects to website
+                Haptics.medium()
+                if let url = URL(string: "https://balance-app.com/export") {
+                    UIApplication.shared.open(url)
+                }
+                return  // Don't show share sheet for PDF
             }
 
             try data.write(to: url, options: .atomic)
@@ -3258,10 +3350,12 @@ struct BackupManager {
 private struct SettingsView: View {
     @Binding var store: Store
     @AppStorage("app.currency") private var selectedCurrency: String = "EUR"
-    @AppStorage("app.language") private var selectedLanguage: String = "en"
+    @AppStorage("app.theme") private var selectedTheme: String = "dark"
     @State private var refreshID = UUID()
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var firestoreManager: FirestoreManager
+    @Environment(\.colorScheme) private var colorScheme
+
     
     var body: some View {
         NavigationStack {
@@ -3278,8 +3372,8 @@ private struct SettingsView: View {
                                     .fill(
                                         LinearGradient(
                                             colors: [
-                                                Color(hex: 0x667EEA),
-                                                Color(hex: 0x764BA2)
+                                                Color(hexValue: 0x667EEA),
+                                                Color(hexValue: 0x764BA2)
                                             ],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
@@ -3327,6 +3421,7 @@ private struct SettingsView: View {
                                 print("Error signing out: \(error)")
                             }
                         }
+                        Haptics.warning()
                     } label: {
                         DS.Card {
                             HStack {
@@ -3345,23 +3440,7 @@ private struct SettingsView: View {
                     .buttonStyle(.plain)
                     
                     // Security Settings
-                    DS.Card {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "lock.shield.fill")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(DS.Colors.text)
-                                Text("Security")
-                                    .font(DS.Typography.section)
-                                    .foregroundStyle(DS.Colors.text)
-                            }
-                            
-                            Divider().overlay(DS.Colors.grid)
-                            
-                            // Biometric Authentication
-                            BiometricSettingRow()
-                        }
-                    }
+                    
                     
                     // Backup & Data
                     BackupDataSection(store: $store)
@@ -3369,7 +3448,7 @@ private struct SettingsView: View {
                     // App Settings
                     DS.Card {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(L10n.t("settings.app_settings"))
+                            Text("App Settings")
                                 .font(DS.Typography.section)
                                 .foregroundStyle(DS.Colors.text)
                             
@@ -3377,7 +3456,7 @@ private struct SettingsView: View {
                             
                             // Currency
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(L10n.t("settings.currency"))
+                                Text("Currency")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                                 
@@ -3401,22 +3480,18 @@ private struct SettingsView: View {
                             
                             Divider().overlay(DS.Colors.grid)
                             
-                            // Language
+                            // Theme
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(L10n.t("settings.language"))
+                                Text("Appearance")
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                                 
-                                Picker("Language", selection: $selectedLanguage) {
-                                    Text("English").tag("en")
-                                    Text("Deutsch").tag("de")
-                                    Text("Español").tag("es")
-                                    Text("فارسی").tag("fa")
+                                Picker("Theme", selection: $selectedTheme) {
+                                    Text("Dark").tag("dark")
+                                    Text("Light").tag("light")
                                 }
-                                .pickerStyle(.menu)
-                                .tint(DS.Colors.text)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
+                                .pickerStyle(.segmented)
+                                .padding(4)
                                 .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -3424,16 +3499,17 @@ private struct SettingsView: View {
                                 )
                             }
                             
-                            Text(L10n.t("settings.language_note"))
+                            Text("Theme preference (coming soon)")
                                 .font(DS.Typography.caption)
                                 .foregroundStyle(DS.Colors.subtext)
                         }
                     }
                     
+                    
                     // Developer Info
                     DS.Card {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(L10n.t("settings.developer"))
+                            Text("Developer")
                                 .font(DS.Typography.section)
                                 .foregroundStyle(DS.Colors.text)
                             
@@ -3441,17 +3517,17 @@ private struct SettingsView: View {
                             
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
-                                    Text(L10n.t("settings.developed_by"))
+                                    Text("Developed by")
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                     Spacer()
-                                    Text("Mani")
+                                    Text("GIORA")
                                         .font(DS.Typography.body)
                                         .foregroundStyle(DS.Colors.text)
                                 }
                                 
                                 HStack {
-                                    Text(L10n.t("settings.version"))
+                                    Text("Version")
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                     Spacer()
@@ -3461,7 +3537,7 @@ private struct SettingsView: View {
                                 }
                                 
                                 HStack {
-                                    Text(L10n.t("settings.build"))
+                                    Text("Build")
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                     Spacer()
@@ -3475,127 +3551,158 @@ private struct SettingsView: View {
                     
                     aboutCard
                     
-                    // Legal & Support
+                    // Help & Support
                     DS.Card {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(L10n.t("settings.legal"))
-                                .font(DS.Typography.section)
-                                .foregroundStyle(DS.Colors.text)
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "questionmark.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: [Color(hexValue: 0x667EEA), Color(hexValue: 0x764BA2)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                
+                                Text("Help & Support")
+                                    .font(DS.Typography.section)
+                                    .foregroundStyle(DS.Colors.text)
+                            }
                             
                             Divider().overlay(DS.Colors.grid)
                             
-                            VStack(alignment: .leading, spacing: 8) {
-                                // Firestore Test (Debug) - Commented out
-                                /*
-                                NavigationLink {
-                                    FirestoreTestView()
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "network.badge.shield.half.filled")
-                                            .foregroundStyle(.orange)
-                                        Text("Test Firestore Connection")
-                                            .font(DS.Typography.body)
-                                            .foregroundStyle(DS.Colors.text)
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(DS.Colors.subtext)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                
-                                Divider().overlay(DS.Colors.grid)
-                                */
-                                
-                                // Support Email
+                            VStack(spacing: 0) {
+                                // Contact Support
                                 Button {
-                                    if let url = URL(string: "mailto:support@balanceapp.example.com?subject=Balance%20App%20Support") {
+                                    if let url = URL(string: "mailto:giora.support@gmail.com?subject=Balance%20App%20Support") {
                                         UIApplication.shared.open(url)
+                                        Haptics.light()
                                     }
                                 } label: {
-                                    HStack {
-                                        Image(systemName: "envelope")
-                                            .foregroundStyle(Color(hex: 0x667EEA))
-                                        Text(L10n.t("settings.support_email"))
-                                            .font(DS.Typography.body)
-                                            .foregroundStyle(DS.Colors.text)
-                                        Spacer()
-                                        Image(systemName: "arrow.up.right")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(DS.Colors.subtext)
-                                    }
+                                    supportRow(
+                                        icon: "envelope.fill",
+                                        title: "Contact Support",
+                                        subtitle: "giora.support@gmail.com",
+                                        iconColor: 0x667EEA
+                                    )
                                 }
                                 .buttonStyle(.plain)
                                 
-                                Divider().overlay(DS.Colors.grid)
+                                Divider().overlay(DS.Colors.grid).padding(.leading, 44)
                                 
                                 // Report Bug
                                 Button {
-                                    if let url = URL(string: "mailto:support@balanceapp.example.com?subject=Bug%20Report&body=App%20Version:%201.0.0%0ABuild:%202026.01%0A%0ADescribe%20the%20issue:%0A") {
+                                    if let url = URL(string: "mailto:giora.support@gmail.com?subject=Bug%20Report%20-%20Balance%20v1.0.0&body=Device:%20\(UIDevice.current.model)%0AiOS:%20\(UIDevice.current.systemVersion)%0AApp%20Version:%201.0.0%0ABuild:%202026.01%0A%0ADescribe%20the%20issue:%0A") {
                                         UIApplication.shared.open(url)
+                                        Haptics.light()
                                     }
                                 } label: {
-                                    HStack {
-                                        Image(systemName: "ladybug")
-                                            .foregroundStyle(Color(hex: 0x667EEA))
-                                        Text(L10n.t("settings.report_bug"))
-                                            .font(DS.Typography.body)
-                                            .foregroundStyle(DS.Colors.text)
-                                        Spacer()
-                                        Image(systemName: "arrow.up.right")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(DS.Colors.subtext)
-                                    }
+                                    supportRow(
+                                        icon: "ladybug.fill",
+                                        title: "Report a Bug",
+                                        subtitle: "Help us improve",
+                                        iconColor: 0xFF3B30
+                                    )
                                 }
                                 .buttonStyle(.plain)
                                 
-                                Divider().overlay(DS.Colors.grid)
+                                Divider().overlay(DS.Colors.grid).padding(.leading, 44)
+                                
+                                // Feature Request
+                                Button {
+                                    if let url = URL(string: "mailto:giora.support@gmail.com?subject=Feature%20Request%20-%20Balance&body=I%20would%20love%20to%20see:%0A") {
+                                        UIApplication.shared.open(url)
+                                        Haptics.light()
+                                    }
+                                } label: {
+                                    supportRow(
+                                        icon: "lightbulb.fill",
+                                        title: "Request Feature",
+                                        subtitle: "Share your ideas",
+                                        iconColor: 0xFF9F0A
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                
+                                Divider().overlay(DS.Colors.grid).padding(.leading, 44)
                                 
                                 // Show Onboarding
                                 Button {
                                     UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
+                                    Haptics.light()
                                 } label: {
-                                    HStack {
-                                        Image(systemName: "play.circle")
-                                            .foregroundStyle(Color(hex: 0x667EEA))
-                                        Text("Show Onboarding")
-                                            .font(DS.Typography.body)
-                                            .foregroundStyle(DS.Colors.text)
-                                        Spacer()
-                                        Image(systemName: "arrow.clockwise")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(DS.Colors.subtext)
-                                    }
+                                    supportRow(
+                                        icon: "play.circle.fill",
+                                        title: "View Tutorial",
+                                        subtitle: "Show onboarding again",
+                                        iconColor: 0x2ED573
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    
+                    // Legal & Licenses
+                    DS.Card {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "doc.text.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(DS.Colors.subtext)
+                                
+                                Text("Legal")
+                                    .font(DS.Typography.section)
+                                    .foregroundStyle(DS.Colors.text)
+                            }
+                            
+                            Divider().overlay(DS.Colors.grid)
+                            
+                            VStack(spacing: 0) {
+                                // Privacy Policy
+                                NavigationLink {
+                                    PrivacyPolicyView()
+                                } label: {
+                                    legalRow(icon: "hand.raised.fill", title: "Privacy Policy")
                                 }
                                 .buttonStyle(.plain)
                                 
-                                Divider().overlay(DS.Colors.grid)
+                                Divider().overlay(DS.Colors.grid).padding(.leading, 44)
                                 
-                                // Licenses
+                                // Terms of Service
+                                NavigationLink {
+                                    TermsOfServiceView()
+                                } label: {
+                                    legalRow(icon: "doc.plaintext.fill", title: "Terms of Service")
+                                }
+                                .buttonStyle(.plain)
+                                
+                                Divider().overlay(DS.Colors.grid).padding(.leading, 44)
+                                
+                                // Open Source Licenses
                                 NavigationLink {
                                     LicensesView()
                                 } label: {
-                                    HStack {
-                                        Image(systemName: "doc.text")
-                                            .foregroundStyle(Color(hex: 0x667EEA))
-                                        Text(L10n.t("settings.licenses"))
-                                            .font(DS.Typography.body)
-                                            .foregroundStyle(DS.Colors.text)
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(DS.Colors.subtext)
-                                    }
+                                    legalRow(icon: "books.vertical.fill", title: "Open Source Licenses")
                                 }
                                 .buttonStyle(.plain)
                             }
                             
                             Divider().overlay(DS.Colors.grid)
                             
-                            // Copyright
-                            Text("© 2026 Mani. All rights reserved.")
-                                .font(DS.Typography.caption)
-                                .foregroundStyle(DS.Colors.subtext)
+                            // Copyright Footer
+                            VStack(spacing: 6) {
+                                Text("© 2026 GIORA")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(DS.Colors.text)
+                                
+                                Text("All rights reserved")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(DS.Colors.subtext)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
                         }
                     }
                     
@@ -3605,12 +3712,9 @@ private struct SettingsView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 24)
             }
-            .navigationTitle(L10n.t("settings.title"))
+            .navigationTitle("Settings")
             .id(refreshID)
-            .onChange(of: selectedLanguage) { _, _ in
-                // Force UI refresh when language changes
-                refreshID = UUID()
-            }
+            
         }
     }
     
@@ -3624,38 +3728,179 @@ private struct SettingsView: View {
         }
         return String(email.prefix(1)).uppercased()
     }
+    
+    // Helper for support rows
+    private func supportRow(icon: String, title: String, subtitle: String, iconColor: Int) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(hexValue: UInt32(iconColor)).opacity(0.15))
+                    .frame(width: 36, height: 36)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color(hexValue: UInt32(iconColor)))
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(DS.Colors.text)
+                
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DS.Colors.subtext)
+            }
+            
+            Spacer()
+            
+            Image(systemName: "arrow.up.right")
+                .font(.system(size: 12))
+                .foregroundStyle(DS.Colors.subtext)
+        }
+        .padding(.vertical, 8)
+    }
+    
+    // Helper for legal rows
+    private func legalRow(icon: String, title: String) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(DS.Colors.surface2)
+                    .frame(width: 36, height: 36)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(DS.Colors.text)
+            }
+            
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(DS.Colors.text)
+            
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12))
+                .foregroundStyle(DS.Colors.subtext)
+        }
+        .padding(.vertical, 8)
+    }
 
     private var aboutCard: some View {
         DS.Card {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(L10n.t("settings.about"))
-                    .font(DS.Typography.section)
-                    .foregroundStyle(DS.Colors.text)
-                
-                Text(L10n.t("settings.about_desc"))
-                    .font(DS.Typography.body)
-                    .foregroundStyle(DS.Colors.subtext)
+            VStack(alignment: .leading, spacing: 14) {
+                // Header
+                HStack(spacing: 10) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(DS.Colors.text)
+                    
+                    Text("About")
+                        .font(DS.Typography.section)
+                        .foregroundStyle(DS.Colors.text)
+                }
                 
                 Divider().overlay(DS.Colors.grid)
                 
-                VStack(alignment: .leading, spacing: 8) {
-                    featureRow(icon: "star.fill", text: L10n.t("settings.feature_privacy"))
-                    featureRow(icon: "chart.line.uptrend.xyaxis", text: L10n.t("settings.feature_insights"))
-                    featureRow(icon: "sparkles", text: L10n.t("settings.feature_ai"))
-                    featureRow(icon: "arrow.down.doc", text: L10n.t("settings.feature_import"))
+                // App Info
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Balance")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.Colors.text)
+                    
+                    Text("Personal Finance Manager")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DS.Colors.subtext)
+                    
+                    Text("v1.0.0 (2026.01)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(DS.Colors.subtext.opacity(0.7))
                 }
+                
+                Divider().overlay(DS.Colors.grid)
+                
+                // Features
+                VStack(spacing: 0) {
+                    aboutRow(
+                        icon: "lock.shield.fill",
+                        title: "Privacy First",
+                        subtitle: "Your data stays on your device",
+                        iconColor: 0x2ED573
+                    )
+                    
+                    Divider().overlay(DS.Colors.grid).padding(.leading, 44)
+                    
+                    aboutRow(
+                        icon: "chart.xyaxis.line",
+                        title: "Smart Insights",
+                        subtitle: "AI-powered financial analysis",
+                        iconColor: 0x667EEA
+                    )
+                    
+                    Divider().overlay(DS.Colors.grid).padding(.leading, 44)
+                    
+                    aboutRow(
+                        icon: "icloud.fill",
+                        title: "Cloud Sync",
+                        subtitle: "Seamless across all devices",
+                        iconColor: 0x3498DB
+                    )
+                    
+                    Divider().overlay(DS.Colors.grid).padding(.leading, 44)
+                    
+                    aboutRow(
+                        icon: "arrow.down.doc.fill",
+                        title: "Import & Export",
+                        subtitle: "CSV, Excel, and more",
+                        iconColor: 0xFF9F0A
+                    )
+                }
+                
+                Divider().overlay(DS.Colors.grid)
+                
+                // Copyright
+                VStack(spacing: 6) {
+                    Text("Developed by GIORA")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DS.Colors.text)
+                    
+                    Text("Made with ❤️ for financial freedom")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.subtext)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
             }
         }
     }
-
-    private func featureRow(icon: String, text: String) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .foregroundStyle(Color(hex: 0x667EEA))
-            Text(text)
-                .font(DS.Typography.caption)
-                .foregroundStyle(DS.Colors.text)
+    
+    // Helper for about rows
+    private func aboutRow(icon: String, title: String, subtitle: String, iconColor: Int) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(hexValue: UInt32(iconColor)).opacity(0.15))
+                    .frame(width: 36, height: 36)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color(hexValue: UInt32(iconColor)))
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(DS.Colors.text)
+                
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DS.Colors.subtext)
+            }
+            
+            Spacer()
         }
+        .padding(.vertical, 8)
     }
 }
 
@@ -3714,7 +3959,7 @@ private struct BackupDataSection: View {
                 } label: {
                     HStack {
                         Image(systemName: "square.and.arrow.up")
-                            .foregroundStyle(Color(hex: 0x667EEA))
+                            .foregroundStyle(Color(hexValue: 0x667EEA))
                         Text("Create Backup")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(DS.Colors.text)
@@ -3926,6 +4171,145 @@ struct BackupRestorePicker: UIViewControllerRepresentable {
     }
 }
 
+// MARK: - Privacy Policy
+
+private struct PrivacyPolicyView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Privacy Policy")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(DS.Colors.text)
+                    .padding(.bottom, 8)
+                
+                Text("Last updated: February 10, 2026")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DS.Colors.subtext)
+                
+                privacySection(
+                    title: "Your Privacy Matters",
+                    content: "Balance is designed with privacy at its core. All your financial data is stored locally on your device and optionally synced to your private iCloud account. We never have access to your financial information."
+                )
+                
+                privacySection(
+                    title: "Data Collection",
+                    content: "We do not collect, transmit, or sell any of your personal or financial data. The app operates entirely offline with optional iCloud sync that only you can access."
+                )
+                
+                privacySection(
+                    title: "Analytics",
+                    content: "Balance does not use any third-party analytics or tracking tools. Your usage patterns remain completely private."
+                )
+                
+                privacySection(
+                    title: "Security",
+                    content: "Your data is encrypted both on device and during iCloud sync using Apple's industry-standard encryption. Only you have the keys to access your information."
+                )
+                
+                privacySection(
+                    title: "Your Rights",
+                    content: "You have full control over your data. You can export, delete, or backup all your financial information at any time directly from the app."
+                )
+                
+                Divider().overlay(DS.Colors.grid)
+                
+                Text("For questions about privacy, contact giora.support@gmail.com")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DS.Colors.subtext)
+            }
+            .padding(20)
+        }
+        .background(DS.Colors.bg)
+        .navigationTitle("Privacy")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+    
+    private func privacySection(title: String, content: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(DS.Colors.text)
+            
+            Text(content)
+                .font(.system(size: 14))
+                .foregroundStyle(DS.Colors.subtext)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// MARK: - Terms of Service
+
+private struct TermsOfServiceView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Terms of Service")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(DS.Colors.text)
+                    .padding(.bottom, 8)
+                
+                Text("Last updated: February 10, 2026")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DS.Colors.subtext)
+                
+                termsSection(
+                    title: "1. Acceptance of Terms",
+                    content: "By using Balance, you agree to these Terms of Service. If you do not agree, please do not use the app."
+                )
+                
+                termsSection(
+                    title: "2. Use of Service",
+                    content: "Balance is provided as-is for personal financial management. You are responsible for the accuracy of data you enter and for maintaining backups of your information."
+                )
+                
+                termsSection(
+                    title: "3. Disclaimer",
+                    content: "Balance is a tool to help you manage your finances. It does not provide financial advice. Always consult with a qualified financial advisor for important financial decisions."
+                )
+                
+                termsSection(
+                    title: "4. Limitation of Liability",
+                    content: "GIORA is not liable for any financial losses, damages, or decisions made based on information in Balance. Use the app at your own discretion."
+                )
+                
+                termsSection(
+                    title: "5. Changes to Terms",
+                    content: "We may update these terms from time to time. Continued use of the app after changes constitutes acceptance of new terms."
+                )
+                
+                termsSection(
+                    title: "6. Contact",
+                    content: "For questions about these terms, contact us at giora.support@gmail.com"
+                )
+                
+                Divider().overlay(DS.Colors.grid)
+                
+                Text("© 2026 GIORA. All rights reserved.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DS.Colors.subtext)
+            }
+            .padding(20)
+        }
+        .background(DS.Colors.bg)
+        .navigationTitle("Terms")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+    
+    private func termsSection(title: String, content: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(DS.Colors.text)
+            
+            Text(content)
+                .font(.system(size: 14))
+                .foregroundStyle(DS.Colors.subtext)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 // MARK: - Licenses
 
 private struct LicensesView: View {
@@ -3985,7 +4369,7 @@ private struct LicensesView: View {
                 // App License
                 DS.Card {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.t("settings.app_license"))
+                        Text("App License")
                             .font(DS.Typography.section)
                             .foregroundStyle(DS.Colors.text)
                         
@@ -4009,7 +4393,7 @@ private struct LicensesView: View {
             .padding(.top, 10)
             .padding(.bottom, 24)
         }
-        .navigationTitle(L10n.t("settings.licenses"))
+        .navigationTitle("Licenses")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -4096,7 +4480,7 @@ private struct AIInsightsView: View {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
-                                    Text(L10n.t("ai.title"))
+                                    Text("AI Insights")
                                         .font(DS.Typography.title)
                                         .foregroundStyle(DS.Colors.text)
                                     Spacer()
@@ -4125,7 +4509,7 @@ private struct AIInsightsView: View {
                                 if isLoading {
                                     HStack(spacing: 10) {
                                         ProgressView()
-                                        Text(L10n.t("ai.analyzing"))
+                                        Text("Analyzing...")
                                             .font(DS.Typography.body)
                                             .foregroundStyle(DS.Colors.subtext)
                                     }
@@ -4154,7 +4538,7 @@ private struct AIInsightsView: View {
                         if let result {
                             DS.Card {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text(L10n.t("ai.summary"))
+                                    Text("Summary")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
 
@@ -4182,7 +4566,7 @@ private struct AIInsightsView: View {
 
                             DS.Card {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text(L10n.t("ai.actions"))
+                                    Text("Actions")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
 
@@ -4198,7 +4582,7 @@ private struct AIInsightsView: View {
 
                             DS.Card {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text(L10n.t("ai.risk"))
+                                    Text("Risk")
                                         .font(DS.Typography.section)
                                         .foregroundStyle(DS.Colors.text)
 
@@ -4473,6 +4857,7 @@ private struct KPI: View {
     let title: String
     let value: String
     var isNegative: Bool = false
+    var isPositive: Bool = false  // ← جدید برای سبز کردن
 
     var body: some View {
         DS.Card(padding: 12) {
@@ -4482,7 +4867,11 @@ private struct KPI: View {
                     .foregroundStyle(DS.Colors.subtext)
                 Text(value)
                     .font(DS.Typography.number)
-                    .foregroundStyle(isNegative ? DS.Colors.danger : DS.Colors.text)
+                    .foregroundStyle(
+                        isNegative ? DS.Colors.danger :
+                        isPositive ? Color.green :
+                        DS.Colors.text
+                    )
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
@@ -4490,7 +4879,12 @@ private struct KPI: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(isNegative ? DS.Colors.danger.opacity(0.5) : Color.clear, lineWidth: 2)
+                .stroke(
+                    isNegative ? DS.Colors.danger.opacity(0.5) :
+                    isPositive ? Color.green.opacity(0.5) :
+                    Color.clear,
+                    lineWidth: 2
+                )
         )
     }
 }
@@ -4546,7 +4940,7 @@ private struct TransactionRow: View {
                     if t.attachmentData != nil {
                         Image(systemName: "paperclip")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Color(hex: 0x667EEA))
+                            .foregroundStyle(Color(hexValue: 0x667EEA))
                     }
                 }
 
@@ -5027,9 +5421,9 @@ private struct AttachmentViewer: View {
                         VStack(spacing: 20) {
                             Image(systemName: "doc.fill")
                                 .font(.system(size: 60))
-                                .foregroundStyle(Color(hex: 0x667EEA))
+                                .foregroundStyle(Color(hexValue: 0x667EEA))
                             
-                            Text(L10n.t("attachment.document"))
+                            Text("Document")
                                 .font(DS.Typography.title)
                                 .foregroundStyle(DS.Colors.text)
                             
@@ -5052,6 +5446,25 @@ private struct AttachmentViewer: View {
     }
 }
 
+
+// MARK: - Feature Bullet for Website Card
+private struct FeatureBullet: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color(hexValue: 0x667EEA))
+                .frame(width: 16)
+            
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(DS.Colors.subtext)
+        }
+    }
+}
 
 private struct InsightRow: View {
     let insight: Insight
@@ -5106,7 +5519,7 @@ private struct MonthPicker: View {
                 Haptics.soft()  // ← light بجای soft
                 selectedMonth = Date()
             } label: {
-                Text(L10n.t("month.this_month"))
+                Text("This month")
                     .font(DS.Typography.caption)
                     .foregroundStyle(DS.Colors.subtext)
                     .padding(.horizontal, 10)
@@ -5134,6 +5547,7 @@ private struct TransactionFormCard: View {
     @Binding var date: Date
     @Binding var category: Category
     @Binding var transactionType: TransactionType  // ← جدید
+    @Binding var store: Store  // ← اضافه شد برای delete category
 
     let categories: [Category]
     let onAddCategory: () -> Void
@@ -5193,7 +5607,7 @@ private struct TransactionFormCard: View {
                 
                 Divider().overlay(DS.Colors.grid)
                 
-                Text(L10n.t("transaction.amount"))
+                Text("Amount")
                     .font(DS.Typography.caption)
                     .foregroundStyle(DS.Colors.subtext)
 
@@ -5209,13 +5623,13 @@ private struct TransactionFormCard: View {
 
                 Divider().overlay(DS.Colors.grid)
 
-                Text(L10n.t("transaction.category"))
+                Text("Category")
                     .font(DS.Typography.caption)
                     .foregroundStyle(DS.Colors.subtext)
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(categories, id: \.self) { c in
+                        ForEach(store.allCategories, id: \.self) { c in
                             Button { category = c } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: c.icon)
@@ -5236,13 +5650,26 @@ private struct TransactionFormCard: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                if case .custom(let name) = c {
+                                    Button(role: .destructive) {
+                                        // Delete custom category
+                                        if category == c {
+                                            category = .other
+                                        }
+                                        store.deleteCustomCategory(name: name)
+                                    } label: {
+                                        Label("Delete Category", systemImage: "trash")
+                                    }
+                                }
+                            }
                         }
                         Button {
                             onAddCategory()
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "plus")
-                                Text(L10n.t("common.add"))
+                                Text("Add")
                             }
                             .font(DS.Typography.caption)
                             .foregroundStyle(DS.Colors.subtext)
@@ -5262,7 +5689,7 @@ private struct TransactionFormCard: View {
 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.t("transaction.date"))
+                        Text("Date")
                             .font(DS.Typography.caption)
                             .foregroundStyle(DS.Colors.subtext)
                         DatePicker("", selection: $date, displayedComponents: [.date])
@@ -5273,7 +5700,7 @@ private struct TransactionFormCard: View {
 
                 Divider().overlay(DS.Colors.grid)
 
-                Text(L10n.t("transaction.note"))
+                Text("Note")
                     .font(DS.Typography.caption)
                     .foregroundStyle(DS.Colors.subtext)
 
@@ -5344,7 +5771,7 @@ struct AddTransactionSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
-                        Text(L10n.t("transaction.add"))
+                        Text("Add Transaction")
                             .font(DS.Typography.title)
                             .foregroundStyle(DS.Colors.text)
                         Spacer()
@@ -5359,6 +5786,7 @@ struct AddTransactionSheet: View {
                         date: $date,
                         category: $category,
                         transactionType: $transactionType,  // ← جدید
+                        store: $store,  // ← اضافه شد
                         categories: store.allCategories,
                         onAddCategory: {
                             showAddCategory = true
@@ -5368,7 +5796,7 @@ struct AddTransactionSheet: View {
                     // ← کارت پیوست (جدید)
                     DS.Card {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(L10n.t("transaction.attachment"))
+                            Text("Attachment")
                                 .font(DS.Typography.caption)
                                 .foregroundStyle(DS.Colors.subtext)
                             
@@ -5378,12 +5806,12 @@ struct AddTransactionSheet: View {
                                     // آیکون بر اساس نوع
                                     ZStack {
                                         Circle()
-                                            .fill(Color(hex: 0x667EEA).opacity(0.15))
+                                            .fill(Color(hexValue: 0x667EEA).opacity(0.15))
                                             .frame(width: 50, height: 50)
                                         
                                         Image(systemName: attachmentType == .image ? "photo" : "doc.fill")
                                             .font(.system(size: 20))
-                                            .foregroundStyle(Color(hex: 0x667EEA))
+                                            .foregroundStyle(Color(hexValue: 0x667EEA))
                                     }
                                     
                                     VStack(alignment: .leading, spacing: 4) {
@@ -5423,7 +5851,7 @@ struct AddTransactionSheet: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "paperclip")
-                                        Text(L10n.t("transaction.add_attachment"))
+                                        Text("Add Attachment")
                                     }
                                     .frame(maxWidth: .infinity)
                                 }
@@ -5435,7 +5863,7 @@ struct AddTransactionSheet: View {
                     // ← کارت روش پرداخت (جدید)
                     DS.Card {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(L10n.t("transaction.payment_method"))
+                            Text("Payment Method")
                                 .font(DS.Typography.caption)
                                 .foregroundStyle(DS.Colors.subtext)
                             
@@ -5537,13 +5965,13 @@ struct AddTransactionSheet: View {
                     } label: {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text(L10n.t("common.save"))
+                            Text("Save")
                         }
                     }
                     .buttonStyle(DS.PrimaryButton())
                     .disabled(DS.Format.cents(from: amountText) <= 0)
                     
-                    Text(L10n.t("transaction.advisor_note"))
+                    Text("Advisor note")
                         .font(DS.Typography.caption)
                         .foregroundStyle(DS.Colors.subtext)
                     
@@ -5553,15 +5981,15 @@ struct AddTransactionSheet: View {
             }
         }
         .confirmationDialog("Add attachment", isPresented: $showAttachmentOptions) {
-            Button(L10n.t("transaction.attach_photo")) {
+            Button("Attach Photo") {
                 showImagePicker = true
             }
-            Button(L10n.t("transaction.attach_file")) {
+            Button("Attach File") {
                 showDocumentPicker = true
             }
             Button("common.cancel", role: .cancel) {}
         }
-        .alert(L10n.t("transaction.new_category"), isPresented: $showAddCategory) {
+        .alert("New Category", isPresented: $showAddCategory) {
             TextField("e.g. Coffee", text: $newCategoryName)
             Button("Add") {
                 let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5574,7 +6002,7 @@ struct AddTransactionSheet: View {
                 newCategoryName = ""
             }
         } message: {
-            Text(L10n.t("transaction.new_category_msg"))
+            Text("Enter category name")
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(imageData: $attachmentData, attachmentType: $attachmentType)
@@ -5610,7 +6038,7 @@ private struct EditTransactionSheet: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text(L10n.t("transaction.edit"))
+                    Text("Edit Transaction")
                         .font(DS.Typography.title)
                         .foregroundStyle(DS.Colors.text)
                     Spacer()
@@ -5625,6 +6053,7 @@ private struct EditTransactionSheet: View {
                     date: $date,
                     category: $category,
                     transactionType: $transactionType,  // ← فیکس
+                    store: $store,  // ← اضافه شد
                     categories: store.allCategories,
                     onAddCategory: {
                         showAddCategory = true
@@ -5634,7 +6063,7 @@ private struct EditTransactionSheet: View {
                 // ← کارت روش پرداخت (جدید)
                 DS.Card {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.t("transaction.payment_method"))
+                        Text("Payment Method")
                             .font(DS.Typography.caption)
                             .foregroundStyle(DS.Colors.subtext)
                         
@@ -5716,50 +6145,6 @@ private struct EditTransactionSheet: View {
                     }
                 }
                 
-                // ← کارت نوع تراکنش
-                DS.Card {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Type")
-                            .font(DS.Typography.caption)
-                            .foregroundStyle(DS.Colors.subtext)
-                        
-                        HStack(spacing: 10) {
-                            ForEach(TransactionType.allCases, id: \.self) { type in
-                                Button {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                        transactionType = type
-                                        Haptics.selection()
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: type.icon)
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundStyle(transactionType == type ? .white : type.color.opacity(0.65))
-                                        
-                                        Text(type.title)
-                                            .font(.system(size: 14, weight: transactionType == type ? .semibold : .medium))
-                                            .foregroundStyle(transactionType == type ? .white : DS.Colors.text.opacity(0.75))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .fill(transactionType == type ? type.color.opacity(0.75) : type.color.opacity(0.06))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(
-                                                transactionType == type ? type.color.opacity(0.25) : type.color.opacity(0.12),
-                                                lineWidth: transactionType == type ? 1.5 : 1
-                                            )
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-
                 Button {
                     guard let idx = index else { return }
                     let amount = DS.Format.cents(from: amountText)
@@ -5788,7 +6173,7 @@ private struct EditTransactionSheet: View {
                 } label: {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                        Text(L10n.t("transaction.save_changes"))
+                        Text("Save Changes")
                     }
                 }
                 .buttonStyle(DS.PrimaryButton())
@@ -5808,7 +6193,7 @@ private struct EditTransactionSheet: View {
             paymentMethod = t.paymentMethod
             transactionType = t.type  // ← جدید
         }
-        .alert(L10n.t("transaction.new_category"), isPresented: $showAddCategory) {
+        .alert("New Category", isPresented: $showAddCategory) {
             TextField("e.g. Coffee", text: $newCategoryName)
             Button("Add") {
                 let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5821,7 +6206,7 @@ private struct EditTransactionSheet: View {
                 newCategoryName = ""
             }
         } message: {
-            Text(L10n.t("transaction.new_category_msg"))
+            Text("Enter category name")
         }
     }
 }
@@ -5831,23 +6216,22 @@ private struct EditTransactionSheet: View {
 
 enum DS {
     enum Colors {
-        // Core dark palette (NO blues)
-        static let bg = Color.black
-        static let surface  = Color(hex: 0x1C1C1E)   // روشن‌تر برای دکمه‌ها
-        static let surface2 = Color(hex: 0x28282A)   // کمی روشن‌تر
+        // Use SwiftUI semantic colors - automatically adapt to light/dark
+        static let bg = Color(uiColor: .systemBackground)
+        static let surface = Color(uiColor: .secondarySystemBackground)
+        static let surface2 = Color(uiColor: .tertiarySystemBackground)
+        
+        static let text = Color(uiColor: .label)
+        static let subtext = Color(uiColor: .secondaryLabel)
+        static let grid = Color(uiColor: .separator)
+        
+        static let accent = Color(hexValue: 0x667EEA)  // Purple accent
+        static let buttonFill = Color(uiColor: .label)  // Adaptive
 
-        static let text = Color.white
-        static let subtext = Color.white.opacity(0.70)
-        static let grid = Color.white.opacity(0.10)
-
-        // Accent stays neutral (white). Status uses only green/red.
-        static let accent = Color.white
-        static let buttonFill = Color.black
-
-        static let positive = Color(hex: 0x2ED573)   // green
-        static let warning  = Color(hex: 0xFF9F0A)   // orange (watch)
-        static let danger   = Color(hex: 0xFF3B30)   // red
-        static let negative = Color(hex: 0xFF3B30)   // same as danger (for errors)
+        static let positive = Color(hexValue: 0x2ED573)   // green
+        static let warning  = Color(hexValue: 0xFF9F0A)   // orange
+        static let danger   = Color(hexValue: 0xFF3B30)   // red
+        static let negative = Color(hexValue: 0xFF3B30)   // red
     }
 
     enum Typography {
@@ -5877,12 +6261,12 @@ enum DS {
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
                 .font(Typography.body.weight(.semibold))
-                .foregroundStyle(Color.black)  // متن مشکی
+                .foregroundStyle(Color(uiColor: .systemBackground))  // Inverse of bg
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white)  // پس‌زمینه سفید
+                        .fill(Color(uiColor: .label))  // Inverse of text
                 )
                 .opacity(configuration.isPressed ? 0.85 : 1.0)
         }
@@ -5897,7 +6281,7 @@ enum DS {
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(hex: 0x3A3A3C))  // خاکستری مشکی
+                        .fill(Color(hexValue: 0x3A3A3C))  // خاکستری مشکی
                 )
                 .opacity(configuration.isPressed ? 0.85 : 1.0)
         }
@@ -6234,74 +6618,74 @@ struct Transaction: Identifiable, Hashable, Codable {
 
 // MARK: - Recurring Transaction
 
-struct RecurringTransaction: Identifiable, Hashable, Codable {
-    let id: UUID
-    var amount: Int
-    var category: Category
-    var note: String
-    var paymentMethod: PaymentMethod
-    var type: TransactionType
-    var frequency: RecurringFrequency
-    var startDate: Date
-    var endDate: Date?
-    var lastGenerated: Date?
-    var isActive: Bool
-    
-    init(id: UUID = UUID(), amount: Int, category: Category, note: String, paymentMethod: PaymentMethod = .card, type: TransactionType = .expense, frequency: RecurringFrequency, startDate: Date, endDate: Date? = nil, lastGenerated: Date? = nil, isActive: Bool = true) {
-        self.id = id
-        self.amount = amount
-        self.category = category
-        self.note = note
-        self.paymentMethod = paymentMethod
-        self.type = type
-        self.frequency = frequency
-        self.startDate = startDate
-        self.endDate = endDate
-        self.lastGenerated = lastGenerated
-        self.isActive = isActive
-    }
-    
-    func shouldGenerateForDate(_ date: Date) -> Bool {
-        guard isActive else { return false }
-        
-        // Check if date is within range
-        if date < startDate { return false }
-        if let end = endDate, date > end { return false }
-        
-        let calendar = Calendar.current
-        
-        // Check if already generated for this period
-        if let last = lastGenerated {
-            switch frequency {
-            case .daily:
-                if calendar.isDate(last, inSameDayAs: date) { return false }
-            case .weekly:
-                if calendar.isDate(last, equalTo: date, toGranularity: .weekOfYear) { return false }
-            case .monthly:
-                if calendar.isDate(last, equalTo: date, toGranularity: .month) { return false }
-            case .yearly:
-                if calendar.isDate(last, equalTo: date, toGranularity: .year) { return false }
-            }
-        }
-        
-        return true
-    }
-    
-    func nextOccurrence(after date: Date) -> Date? {
-        let calendar = Calendar.current
-        
-        switch frequency {
-        case .daily:
-            return calendar.date(byAdding: .day, value: 1, to: date)
-        case .weekly:
-            return calendar.date(byAdding: .weekOfYear, value: 1, to: date)
-        case .monthly:
-            return calendar.date(byAdding: .month, value: 1, to: date)
-        case .yearly:
-            return calendar.date(byAdding: .year, value: 1, to: date)
-        }
-    }
-}
+// struct RecurringTransaction: Identifiable, Hashable, Codable {
+//     let id: UUID
+//     var amount: Int
+//     var category: Category
+//     var note: String
+//     var paymentMethod: PaymentMethod
+//     var type: TransactionType
+//     var frequency: RecurringFrequency
+//     var startDate: Date
+//     var endDate: Date?
+//     var lastGenerated: Date?
+//     var isActive: Bool
+//
+//     init(id: UUID = UUID(), amount: Int, category: Category, note: String, paymentMethod: PaymentMethod = .card, type: TransactionType = .expense, frequency: RecurringFrequency, startDate: Date, endDate: Date? = nil, lastGenerated: Date? = nil, isActive: Bool = true) {
+//         self.id = id
+//         self.amount = amount
+//         self.category = category
+//         self.note = note
+//         self.paymentMethod = paymentMethod
+//         self.type = type
+//         self.frequency = frequency
+//         self.startDate = startDate
+//         self.endDate = endDate
+//         self.lastGenerated = lastGenerated
+//         self.isActive = isActive
+//     }
+//
+//     func shouldGenerateForDate(_ date: Date) -> Bool {
+//         guard isActive else { return false }
+//
+//         // Check if date is within range
+//         if date < startDate { return false }
+//         if let end = endDate, date > end { return false }
+//
+//         let calendar = Calendar.current
+//
+//         // Check if already generated for this period
+//         if let last = lastGenerated {
+//             switch frequency {
+//             case .daily:
+//                 if calendar.isDate(last, inSameDayAs: date) { return false }
+//             case .weekly:
+//                 if calendar.isDate(last, equalTo: date, toGranularity: .weekOfYear) { return false }
+//             case .monthly:
+//                 if calendar.isDate(last, equalTo: date, toGranularity: .month) { return false }
+//             case .yearly:
+//                 if calendar.isDate(last, equalTo: date, toGranularity: .year) { return false }
+//             }
+//         }
+//
+//         return true
+//     }
+//
+//     func nextOccurrence(after date: Date) -> Date? {
+//         let calendar = Calendar.current
+//
+//         switch frequency {
+//         case .daily:
+//             return calendar.date(byAdding: .day, value: 1, to: date)
+//         case .weekly:
+//             return calendar.date(byAdding: .weekOfYear, value: 1, to: date)
+//         case .monthly:
+//             return calendar.date(byAdding: .month, value: 1, to: date)
+//         case .yearly:
+//             return calendar.date(byAdding: .year, value: 1, to: date)
+//         }
+//     }
+// }
 
 enum RecurringFrequency: String, Codable, CaseIterable {
     case daily = "daily"
@@ -6311,10 +6695,10 @@ enum RecurringFrequency: String, Codable, CaseIterable {
     
     var displayName: String {
         switch self {
-        case .daily: return L10n.t("recurring.daily")
-        case .weekly: return L10n.t("recurring.weekly")
-        case .monthly: return L10n.t("recurring.monthly")
-        case .yearly: return L10n.t("recurring.yearly")
+        case .daily: return "Daily"
+        case .weekly: return "Weekly"
+        case .monthly: return "Monthly"
+        case .yearly: return "Yearly"
         }
     }
     
@@ -6343,38 +6727,38 @@ enum PaymentMethod: String, Codable, Hashable, CaseIterable {
     
     var displayName: String {
         switch self {
-        case .cash: return L10n.t("payment.cash")
-        case .card: return L10n.t("payment.card")
+        case .cash: return "Cash"
+        case .card: return "Card"
         }
     }
     
     var tint: Color {
         switch self {
-        case .cash: return Color(hex: 0x2ECC71)  // سبز زنده
-        case .card: return Color(hex: 0x667EEA)  // آبی-بنفش خفن
+        case .cash: return Color(hexValue: 0x2ECC71)  // سبز زنده
+        case .card: return Color(hexValue: 0x667EEA)  // آبی-بنفش خفن
         }
     }
     
     var tintSecondary: Color {
         switch self {
-        case .cash: return Color(hex: 0x27AE60)  // سبز تیره‌تر
-        case .card: return Color(hex: 0x764BA2)  // بنفش تیره‌تر
+        case .cash: return Color(hexValue: 0x27AE60)  // سبز تیره‌تر
+        case .card: return Color(hexValue: 0x764BA2)  // بنفش تیره‌تر
         }
     }
     
     var accentColor: Color {
         switch self {
-        case .cash: return Color(hex: 0x2ECC71)
-        case .card: return Color(hex: 0x667EEA)
+        case .cash: return Color(hexValue: 0x2ECC71)
+        case .card: return Color(hexValue: 0x667EEA)
         }
     }
     
     var gradientColors: [Color] {
         switch self {
         case .cash:
-            return [Color(hex: 0x0E0E10), Color(hex: 0x2ECC71)]  // مشکی برنامه → سبز
+            return [Color(hexValue: 0x0E0E10), Color(hexValue: 0x2ECC71)]  // مشکی برنامه → سبز
         case .card:
-            return [Color(hex: 0x0E0E10), Color(hex: 0x9333EA)]  // مشکی برنامه → بنفش
+            return [Color(hexValue: 0x0E0E10), Color(hexValue: 0x9333EA)]  // مشکی برنامه → بنفش
         }
     }
     
@@ -6382,13 +6766,13 @@ enum PaymentMethod: String, Codable, Hashable, CaseIterable {
         switch self {
         case .cash:
             return LinearGradient(
-                colors: [Color(hex: 0x0E0E10), Color(hex: 0x2ECC71)],
+                colors: [Color(hexValue: 0x0E0E10), Color(hexValue: 0x2ECC71)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         case .card:
             return LinearGradient(
-                colors: [Color(hex: 0x0E0E10), Color(hex: 0x9333EA)],
+                colors: [Color(hexValue: 0x0E0E10), Color(hexValue: 0x9333EA)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -6499,12 +6883,12 @@ struct DocumentPicker: UIViewControllerRepresentable {
 
 
 enum Category: Hashable, Codable {
-    case groceries, rent, bills, transport, health, education, dining, shopping, entertainment, other
+    case groceries, rent, bills, transport, health, education, dining, shopping, other
     case custom(String)
 
     // فقط کتگوری‌های پیش‌فرض (برای بودجه‌ها/سقف‌ها)
     static var allCases: [Category] {
-        [.groceries, .rent, .bills, .transport, .health, .education, .dining, .shopping, .entertainment, .other]
+        [.groceries, .rent, .bills, .transport, .health, .education, .dining, .shopping, .other]
     }
 
     /// Stable key for persistence / dictionaries.
@@ -6519,7 +6903,6 @@ enum Category: Hashable, Codable {
         case .education: return "education"
         case .dining: return "dining"
         case .shopping: return "shopping"
-        case .entertainment: return "entertainment"
         case .other: return "other"
         case .custom(let name):
             return "custom:\(name)"
@@ -6536,7 +6919,6 @@ enum Category: Hashable, Codable {
         case .education: return "Education"
         case .dining: return "Dining"
         case .shopping: return "Shopping"
-        case .entertainment: return "Entertainment"
         case .other: return "Other"
         case .custom(let name): return name
         }
@@ -6556,7 +6938,6 @@ enum Category: Hashable, Codable {
             case .education: return "book"
             case .dining: return "fork.knife"
             case .shopping: return "bag"
-            case .entertainment: return "gamecontroller"
             case .other: return "square.grid.2x2"
             case .custom: return "tag" // unreachable (handled بالا)
             }
@@ -6566,20 +6947,20 @@ enum Category: Hashable, Codable {
     var tint: Color {
         switch self {
         case .custom:
-            return Color(hex: 0x8395A7)
+            return Color(hexValue: 0x95A5A6)  // Gray
         default:
             switch self {
-            case .groceries: return Color.green
-            case .rent: return Color.yellow
-            case .bills: return Color.orange
-            case .transport: return Color.blue
-            case .health: return Color(hex: 0x68DEA9)
-            case .education: return Color(hex: 0x576574)
-            case .dining: return Color(hex: 0xFF6B6B)
-            case .shopping: return Color(hex: 0xE84393)
-            case .entertainment: return Color.purple
-            case .other: return Color(hex: 0x8395A7)
-            case .custom: return Color(hex: 0x8395A7) // unreachable
+            // پالت رنگی واضح و متمایز
+            case .groceries: return Color(hexValue: 0x2ECC71)  // Green
+            case .rent: return Color(hexValue: 0x3498DB)       // Blue
+            case .bills: return Color(hexValue: 0xF39C12)      // Orange
+            case .transport: return Color(hexValue: 0x9B59B6)  // Purple
+            case .health: return Color(hexValue: 0xE74C3C)     // Red
+            case .education: return Color(hexValue: 0x1ABC9C)  // Teal
+            case .dining: return Color(hexValue: 0xE91E63)     // Pink
+            case .shopping: return Color(hexValue: 0xFF5722)   // Deep Orange
+            case .other: return Color(hexValue: 0x607D8B)      // Blue Gray
+            case .custom: return Color(hexValue: 0x95A5A6)
             }
         }
     }
@@ -6604,7 +6985,6 @@ enum Category: Hashable, Codable {
             case "education": self = .education
             case "dining": self = .dining
             case "shopping": self = .shopping
-            case "entertainment": self = .entertainment
             default: self = .other
             }
         case .custom:
@@ -6632,7 +7012,6 @@ enum Category: Hashable, Codable {
             case .education: raw = "education"
             case .dining: raw = "dining"
             case .shopping: raw = "shopping"
-            case .entertainment: raw = "entertainment"
             case .other: raw = "other"
             case .custom: raw = "other"
             }
@@ -6656,7 +7035,7 @@ struct Store: Hashable, Codable {
     var deletedTransactionIds: [String] = []  // UUID as string
     
     // MARK: - New Features
-    var recurringTransactions: [RecurringTransaction] = []
+    // var recurringTransactions: [RecurringTransaction] = []  // COMMENTED OUT - باگ داره
 
     static func monthKey(_ date: Date) -> String {
         let cal = Calendar.current
@@ -6852,6 +7231,24 @@ struct Store: Hashable, Codable {
         customCategoryNames.append(trimmed)
         customCategoryNames.sort { $0.lowercased() < $1.lowercased() }
     }
+    
+    mutating func deleteCustomCategory(name: String) {
+        // Remove from custom categories list
+        customCategoryNames.removeAll { $0 == name }
+        
+        // Update all transactions using this category to "Other"
+        for i in transactions.indices {
+            if case .custom(let catName) = transactions[i].category, catName == name {
+                transactions[i].category = .other
+            }
+        }
+        
+        // Remove category budgets for this category (all months)
+        let categoryKey = Category.custom(name).storageKey
+        for monthKey in categoryBudgetsByMonth.keys {
+            categoryBudgetsByMonth[monthKey]?.removeValue(forKey: categoryKey)
+        }
+    }
 
     // MARK: - Persistence
 
@@ -7018,8 +7415,15 @@ enum Analytics {
 
     static func monthSummary(store: Store) -> MonthSummary {
         let tx = monthTransactions(store: store)
-        let total = tx.reduce(0) { $0 + $1.amount }
-        let remaining = store.budgetTotal - total
+        
+        // totalSpent = فقط expenses (مثل Store.spent)
+        let totalSpent = tx.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+        
+        // income جداگانه (مثل Store.income)
+        let totalIncome = tx.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+        
+        // remaining = budget + income - spent (مثل Store.remaining)
+        let remaining = store.budgetTotal + totalIncome - totalSpent
 
         let cal = Calendar.current
         let range = cal.range(of: .day, in: .month, for: store.selectedMonth) ?? 1..<31
@@ -7027,23 +7431,23 @@ enum Analytics {
         let dayNow = cal.component(.day, from: Date())
         let isCurrentMonth = cal.isDate(Date(), equalTo: store.selectedMonth, toGranularity: .month)
         let divisor = max(1, isCurrentMonth ? min(dayNow, daysInMonth) : daysInMonth)
-        let dailyAvg = total / divisor
+        let dailyAvg = totalSpent / divisor
 
-        let ratio = store.budgetTotal > 0 ? Double(total) / Double(store.budgetTotal) : 0
-        return .init(budgetCents: store.budgetTotal, totalSpent: total, remaining: remaining, dailyAvg: dailyAvg, spentRatio: ratio)
+        let ratio = store.budgetTotal > 0 ? Double(totalSpent) / Double(store.budgetTotal) : 0
+        return .init(budgetCents: store.budgetTotal, totalSpent: totalSpent, remaining: remaining, dailyAvg: dailyAvg, spentRatio: ratio)
     }
 
     static func budgetPressure(store: Store) -> Pressure {
         let s = monthSummary(store: store)
         if s.spentRatio < 0.75 {
-            return .init(title: NSLocalizedString("status.stable.title", comment: ""),
-                        detail: NSLocalizedString("status.stable.detail", comment: ""), level: .ok)
+            return .init(title: "On Track",
+                        detail: "Spending is on track", level: .ok)
         } else if s.spentRatio < 0.95 {
-            return .init(title: NSLocalizedString("status.needs_attention.title", comment: ""),
-                        detail: NSLocalizedString("status.needs_attention.detail", comment: ""), level: .watch)
+            return .init(title: "Needs Attention",
+                        detail: "Budget pressure building", level: .watch)
         } else {
-            return .init(title: NSLocalizedString("status.budget_pressure.title", comment: ""),
-                        detail: NSLocalizedString("status.budget_pressure.detail", comment: ""), level: .risk)
+            return .init(title: "Budget Pressure",
+                        detail: "Approaching or exceeded budget", level: .risk)
         }
     }
 
@@ -7149,7 +7553,20 @@ enum Analytics {
     }
 
     static func dailySpendPoints(store: Store) -> [DayPoint] {
-        let tx = monthTransactions(store: store)
+        let tx = monthTransactions(store: store).filter { $0.type == .expense }
+        guard !tx.isEmpty else { return [] }
+
+        let cal = Calendar.current
+        var byDay: [Int: Int] = [:]
+        for t in tx {
+            let d = cal.component(.day, from: t.date)
+            byDay[d, default: 0] += t.amount
+        }
+        return byDay.keys.sorted().map { DayPoint(day: $0, amount: byDay[$0] ?? 0) }
+    }
+    
+    static func dailyIncomePoints(store: Store) -> [DayPoint] {
+        let tx = monthTransactions(store: store).filter { $0.type == .income }
         guard !tx.isEmpty else { return [] }
 
         let cal = Calendar.current
@@ -7279,7 +7696,7 @@ enum Analytics {
             }
 
             let dining = tx.filter { $0.category == .dining }.reduce(0) { $0 + $1.amount }
-            let ent = tx.filter { $0.category == .entertainment }.reduce(0) { $0 + $1.amount }
+            let ent = tx.filter { $0.category == .other }.reduce(0) { $0 + $1.amount }
             let total = tx.reduce(0) { $0 + $1.amount }
             if total > 0 {
                 let opt = dining + ent
@@ -7357,10 +7774,10 @@ private struct UUIDWrapper: Identifiable {
 // MARK: - Helpers
 
 extension Color {
-    init(hex: UInt32) {
-        let r = Double((hex >> 16) & 0xFF) / 255.0
-        let g = Double((hex >> 8) & 0xFF) / 255.0
-        let b = Double(hex & 0xFF) / 255.0
+    init(hexValue: UInt32) {
+        let r = Double((hexValue >> 16) & 0xFF) / 255.0
+        let g = Double((hexValue >> 8) & 0xFF) / 255.0
+        let b = Double(hexValue & 0xFF) / 255.0
         self.init(red: r, green: g, blue: b)
     }
 }
@@ -7785,6 +8202,7 @@ private enum Exporter {
 
         var txRows: [[Cell]] = [[
             .s("Date"),
+            .s("Type"),  // ← جدید
             .s("Category"),
             .s("Payment Method"),  // ← جدید
             .s("Note"),
@@ -7800,6 +8218,7 @@ private enum Exporter {
             runningCents += t.amount
             txRows.append([
                 .s(df.string(from: t.date)),
+                .s(t.type == .income ? "Income" : "Expense"),  // ← جدید
                 .s(t.category.title),
                 .s(t.paymentMethod.displayName),  // ← جدید
                 .s(t.note),
@@ -7979,14 +8398,15 @@ private static func zipXLSX(entries: [(String, Data)]) -> Data {
 
         // Transactions
         lines.append("# Transactions")
-        lines.append("date,category,payment_method,note,amount_eur")
+        lines.append("date,type,category,payment_method,note,amount_eur")
         for t in transactions.sorted(by: { $0.date < $1.date }) {
             let dateStr = df.string(from: t.date)
+            let typeStr = t.type == .income ? "income" : "expense"
             let cat = esc(t.category.title)
             let payment = esc(t.paymentMethod.displayName)  // ← جدید
             let note = esc(t.note)
             let eur = String(format: "%.2f", Double(t.amount) / 100.0)
-            lines.append("\(dateStr),\(cat),\(payment),\(note),\(eur)")
+            lines.append("\(dateStr),\(typeStr),\(cat),\(payment),\(note),\(eur)")
         }
 
         return lines.joined(separator: "\n") + "\n"
@@ -8220,6 +8640,7 @@ private struct ImportTransactionsScreen: View {
     @State private var colCategory: Int? = nil
     @State private var colNote: Int? = nil
     @State private var colPaymentMethod: Int? = nil  // جدید
+    @State private var colType: Int? = nil  // جدید - برای income/expense
 
     @State private var hasHeaderRow: Bool = true
 
@@ -8232,13 +8653,14 @@ private struct ImportTransactionsScreen: View {
 
                     DS.Card {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(L10n.t("import.from_csv"))
+                            Text("Import from CSV")
                                 .font(DS.Typography.section)
                                 .foregroundStyle(DS.Colors.text)
 
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(L10n.t("import.csv_columns"))
-                                Text(L10n.t("import.csv_format"))
+                                Text("CSV Format Requirements")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(DS.Colors.text)
                                 Text("Note: If you import the same CSV again, Balance will only add transactions that aren’t already in the app (duplicates are skipped).")
                             }
                                 .font(DS.Typography.caption)
@@ -8255,7 +8677,7 @@ private struct ImportTransactionsScreen: View {
                             }
                             .buttonStyle(DS.PrimaryButton())
 
-                            Text(L10n.t("import.xlsx_tip"))
+                            Text("Excel files also supported")
                                 .font(DS.Typography.caption)
                                 .foregroundStyle(DS.Colors.subtext)
                         }
@@ -8264,22 +8686,23 @@ private struct ImportTransactionsScreen: View {
                     if let parsed {
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text(L10n.t("import.columns"))
+                                Text("Columns")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
 
-                                Toggle(L10n.t("import.header_row"), isOn: $hasHeaderRow)
+                                Toggle("First row is header", isOn: $hasHeaderRow)
                                     .tint(DS.Colors.positive)
 
                                 columnPicker(title: "Date", columns: parsed.columns, selection: $colDate)
                                 columnPicker(title: "Amount", columns: parsed.columns, selection: $colAmount)
                                 columnPicker(title: "Category", columns: parsed.columns, selection: $colCategory)
-                                columnPicker(title: "Note (optional)", columns: parsed.columns, selection: $colNote)
+                                columnPicker(title: "Type (optional - income/expense)", columns: parsed.columns, selection: $colType)
                                 columnPicker(title: "Payment Method (optional)", columns: parsed.columns, selection: $colPaymentMethod)
+                                columnPicker(title: "Note (optional)", columns: parsed.columns, selection: $colNote)
 
                                 Divider().overlay(DS.Colors.grid)
 
-                                Text(L10n.t("import.preview"))
+                                Text("Preview")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
 
@@ -8308,7 +8731,7 @@ private struct ImportTransactionsScreen: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "square.and.arrow.down")
-                                        Text(L10n.t("import.import_btn"))
+                                        Text("Import")
                                     }
                                 }
                                 .buttonStyle(DS.PrimaryButton())
@@ -8351,26 +8774,26 @@ private struct ImportTransactionsScreen: View {
         .onChange(of: hasHeaderRow) { _, _ in
             if let parsed { autoDetectMapping(parsed) }
         }
-        .alert(L10n.t("import.mode_title"), isPresented: $showImportModeAlert) {
-            Button(L10n.t("import.mode_merge")) {
+        .alert("Import Mode", isPresented: $showImportModeAlert) {
+            Button("Merge") {
                 if let p = pendingImportParsed {
                     importNow(p, mode: .merge)
                     pendingImportParsed = nil
                 }
             }
             
-            Button(L10n.t("import.mode_replace"), role: .destructive) {
+            Button("Replace All", role: .destructive) {
                 if let p = pendingImportParsed {
                     importNow(p, mode: .replace)
                     pendingImportParsed = nil
                 }
             }
             
-            Button(L10n.t("common.cancel"), role: .cancel) {
+            Button("Cancel", role: .cancel) {
                 pendingImportParsed = nil
             }
         } message: {
-            Text(String(format: L10n.t("import.mode_message"), store.transactions.count))
+            Text(String(format: "You have %d existing transactions", store.transactions.count))
         }
     }
 
@@ -8554,7 +8977,7 @@ private struct ImportTransactionsScreen: View {
         if t.contains("edu") || t.contains("school") { return .education }
         if t.contains("dining") || t.contains("food") || t.contains("restaurant") { return .dining }
         if t.contains("shop") { return .shopping }
-        if t.contains("ent") || t.contains("movie") || t.contains("game") { return .entertainment }
+        if t.contains("ent") || t.contains("movie") || t.contains("game") { return .other }
         return .other
     }
     
@@ -8571,6 +8994,25 @@ private struct ImportTransactionsScreen: View {
         if t.contains("card") || t.contains("kart") { return .card }
         
         return .cash  // default to cash if unknown
+    }
+    
+    private func mapType(_ s: String) -> TransactionType {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if t.isEmpty { return .expense }  // default
+        
+        // Check for income keywords
+        if t == "income" || t == "درآمد" || t == "einkommen" || t == "ingreso" { return .income }
+        if t == "in" || t == "+" || t == "credit" { return .income }
+        if t.contains("income") || t.contains("earning") || t.contains("salary") { return .income }
+        if t.contains("revenue") || t.contains("deposit") { return .income }
+        
+        // Check for expense keywords
+        if t == "expense" || t == "هزینه" || t == "ausgabe" || t == "gasto" { return .expense }
+        if t == "out" || t == "-" || t == "debit" { return .expense }
+        if t.contains("expense") || t.contains("spending") { return .expense }
+        if t.contains("payment") || t.contains("withdrawal") { return .expense }
+        
+        return .expense  // default to expense if unknown
     }
 
     private func importNow(_ parsed: ParsedCSV, mode: ImportMode) {
@@ -8627,6 +9069,7 @@ private struct ImportTransactionsScreen: View {
             let category = mapCategory(cell(cIdx))
             let note = (colNote == nil) ? "" : cell(colNote!)
             let paymentMethod = (colPaymentMethod == nil) ? .cash : mapPaymentMethod(cell(colPaymentMethod!))
+            let type = (colType == nil) ? .expense : mapType(cell(colType!))
 
             let sig = txSignature(date: date, amountCents: amountCents, category: category, note: note)
 
@@ -8649,7 +9092,8 @@ private struct ImportTransactionsScreen: View {
                 date: date,
                 category: category,
                 note: note,
-                paymentMethod: paymentMethod
+                paymentMethod: paymentMethod,
+                type: type
             ))
             added += 1
         }
@@ -8808,3 +9252,297 @@ private enum CSV {
         return rows.map { $0.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
     }
 }
+// // MARK: - Add Recurring Sheet (Professional - Fixed)
+//
+// // MARK: - Add Recurring Sheet
+//
+// private struct AddRecurringSheet: View {
+//     @Binding var store: Store
+//     @Environment(\.dismiss) private var dismiss
+//     @AppStorage("app.currency") private var selectedCurrency: String = "EUR"
+//
+//     @State private var amount: String = ""
+//     @State private var selectedCategory: Category = .groceries
+//     @State private var note: String = ""
+//     @State private var selectedPaymentMethod: PaymentMethod = .card
+//     @State private var selectedType: TransactionType = .expense
+//     @State private var selectedFrequency: RecurringFrequency = .monthly
+//     @State private var startDate: Date = Date()
+//     @State private var hasEndDate: Bool = false
+//     @State private var endDate: Date = Date()
+//
+//     private var currencySymbol: String {
+//         switch selectedCurrency {
+//         case "USD": return "$"
+//         case "GBP": return "£"
+//         case "JPY": return "¥"
+//         case "CAD": return "C$"
+//         default: return "€"
+//         }
+//     }
+//
+//     var body: some View {
+//         NavigationStack {
+//             ScrollView {
+//                 VStack(spacing: 0) {
+//                     // Header Section
+//                     VStack(spacing: 20) {
+//                         // Type Selector
+//                         HStack(spacing: 12) {
+//                             typeButton(.expense, icon: "minus", title: "Expense")
+//                             typeButton(.income, icon: "plus", title: "Income")
+//                         }
+//                         .padding(.horizontal, 20)
+//                         .padding(.top, 20)
+//
+//                         // Amount Input
+//                         VStack(spacing: 8) {
+//                             Text("Amount")
+//                                 .font(.system(size: 13, weight: .medium))
+//                                 .foregroundStyle(Color(uiColor: .secondaryLabel))
+//                                 .frame(maxWidth: .infinity, alignment: .leading)
+//
+//                             HStack(spacing: 8) {
+//                                 Text(currencySymbol)
+//                                     .font(.system(size: 32, weight: .medium, design: .rounded))
+//                                     .foregroundStyle(Color(uiColor: .tertiaryLabel))
+//
+//                                 TextField("0.00", text: $amount)
+//                                     .font(.system(size: 40, weight: .semibold, design: .rounded))
+//                                     .keyboardType(.decimalPad)
+//                                     .foregroundStyle(Color(uiColor: .label))
+//                             }
+//                         }
+//                         .padding(.horizontal, 20)
+//                     }
+//
+//                     Divider().padding(.vertical, 24)
+//
+//                     // Details Section
+//                     VStack(spacing: 20) {
+//                         detailRow(title: "Category") {
+//                             categoryPicker
+//                         }
+//
+//                         detailRow(title: "Note (Optional)") {
+//                             TextField("Add a note...", text: $note)
+//                                 .font(.system(size: 15))
+//                                 .padding(12)
+//                                 .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+//                         }
+//
+//                         detailRow(title: "Payment Method") {
+//                             paymentMethodPicker
+//                         }
+//                     }
+//                     .padding(.horizontal, 20)
+//
+//                     Divider().padding(.vertical, 24)
+//
+//                     // Frequency Section
+//                     VStack(spacing: 20) {
+//                         detailRow(title: "Frequency") {
+//                             frequencyPicker
+//                         }
+//
+//                         detailRow(title: "Start Date") {
+//                             DatePicker("", selection: $startDate, displayedComponents: .date)
+//                                 .labelsHidden()
+//                                 .datePickerStyle(.compact)
+//                                 .frame(maxWidth: .infinity, alignment: .trailing)
+//                         }
+//
+//                         detailRow(title: "End Date") {
+//                             HStack {
+//                                 Toggle("", isOn: $hasEndDate)
+//                                     .labelsHidden()
+//
+//                                 if hasEndDate {
+//                                     DatePicker("", selection: $endDate, in: startDate..., displayedComponents: .date)
+//                                         .labelsHidden()
+//                                         .datePickerStyle(.compact)
+//                                 }
+//                             }
+//                         }
+//                     }
+//                     .padding(.horizontal, 20)
+//
+//                     Spacer(minLength: 100)
+//                 }
+//             }
+//             .background(Color(uiColor: .systemBackground))
+//             .navigationTitle("Add Recurring")
+//             .navigationBarTitleDisplayMode(.inline)
+//             .toolbar {
+//                 ToolbarItem(placement: .cancellationAction) {
+//                     Button("Cancel") { dismiss() }
+//                 }
+//
+//                 ToolbarItem(placement: .confirmationAction) {
+//                     Button("Save") {
+//                         saveRecurring()
+//                     }
+//                     .disabled(!canSave)
+//                 }
+//             }
+//             .safeAreaInset(edge: .bottom) {
+//                 if canSave {
+//                     Button {
+//                         saveRecurring()
+//                     } label: {
+//                         Text("Save Recurring Transaction")
+//                             .font(.system(size: 17, weight: .semibold))
+//                             .foregroundStyle(.white)
+//                             .frame(maxWidth: .infinity)
+//                             .frame(height: 52)
+//                             .background(Color(hexValue: 0x667EEA), in: RoundedRectangle(cornerRadius: 14))
+//                     }
+//                     .padding(.horizontal, 20)
+//                     .padding(.bottom, 16)
+//                     .background(Color(uiColor: .systemBackground))
+//                 }
+//             }
+//         }
+//     }
+//
+//     // MARK: - Pickers
+//
+//     private var categoryPicker: some View {
+//         Menu {
+//             ForEach(store.allCategories, id: \.self) { category in
+//                 Button {
+//                     selectedCategory = category
+//                 } label: {
+//                     Label(category.title, systemImage: category.icon)
+//                 }
+//             }
+//         } label: {
+//             pickerLabel(icon: selectedCategory.icon, text: selectedCategory.title)
+//         }
+//     }
+//
+//     private var paymentMethodPicker: some View {
+//         Menu {
+//             ForEach(PaymentMethod.allCases, id: \.self) { method in
+//                 Button {
+//                     selectedPaymentMethod = method
+//                 } label: {
+//                     Label(method.rawValue, systemImage: method.icon)
+//                 }
+//             }
+//         } label: {
+//             pickerLabel(icon: selectedPaymentMethod.icon, text: selectedPaymentMethod.rawValue)
+//         }
+//     }
+//
+//     private var frequencyPicker: some View {
+//         Menu {
+//             ForEach(RecurringFrequency.allCases, id: \.self) { frequency in
+//                 Button {
+//                     selectedFrequency = frequency
+//                 } label: {
+//                     Label(frequency.displayName, systemImage: frequency.icon)
+//                 }
+//             }
+//         } label: {
+//             pickerLabel(icon: selectedFrequency.icon, text: selectedFrequency.displayName)
+//         }
+//     }
+//
+//     private func pickerLabel(icon: String, text: String) -> some View {
+//         HStack(spacing: 10) {
+//             Image(systemName: icon)
+//                 .font(.system(size: 16))
+//                 .foregroundStyle(Color(uiColor: .label))
+//                 .frame(width: 28, height: 28)
+//                 .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+//
+//             Text(text)
+//                 .font(.system(size: 15))
+//                 .foregroundStyle(Color(uiColor: .label))
+//
+//             Spacer()
+//
+//             Image(systemName: "chevron.up.chevron.down")
+//                 .font(.system(size: 12, weight: .semibold))
+//                 .foregroundStyle(Color(uiColor: .secondaryLabel))
+//         }
+//         .padding(12)
+//         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+//     }
+//
+//     // MARK: - Type Button
+//
+//     private func typeButton(_ type: TransactionType, icon: String, title: String) -> some View {
+//         Button {
+//             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+//                 selectedType = type
+//             }
+//         } label: {
+//             HStack(spacing: 8) {
+//                 Image(systemName: "\(icon).circle")
+//                     .font(.system(size: 18))
+//
+//                 Text(title)
+//                     .font(.system(size: 15, weight: .semibold))
+//             }
+//             .foregroundStyle(selectedType == type ? Color(uiColor: .label) : Color(uiColor: .secondaryLabel))
+//             .frame(maxWidth: .infinity)
+//             .frame(height: 44)
+//             .background(
+//                 selectedType == type ? Color(uiColor: .secondarySystemBackground) : Color.clear,
+//                 in: RoundedRectangle(cornerRadius: 12)
+//             )
+//             .overlay(
+//                 RoundedRectangle(cornerRadius: 12)
+//                     .strokeBorder(
+//                         selectedType == type ? Color(uiColor: .separator) : Color(uiColor: .separator).opacity(0.5),
+//                         lineWidth: 1.5
+//                     )
+//             )
+//         }
+//         .buttonStyle(.plain)
+//     }
+//
+//     // MARK: - Detail Row
+//
+//     private func detailRow<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+//         VStack(alignment: .leading, spacing: 10) {
+//             Text(title)
+//                 .font(.system(size: 13, weight: .medium))
+//                 .foregroundStyle(Color(uiColor: .secondaryLabel))
+//
+//             content()
+//         }
+//     }
+//
+//     // MARK: - Validation & Save
+//
+//     private var canSave: Bool {
+//         guard let amountValue = Double(amount.replacingOccurrences(of: ",", with: ".")),
+//               amountValue > 0 else {
+//             return false
+//         }
+//         return true
+//     }
+//
+//     private func saveRecurring() {
+//         guard let amountValue = Double(amount.replacingOccurrences(of: ",", with: ".")) else { return }
+//
+//         let amountInCents = Int(amountValue * 100)
+//
+//         let recurring = RecurringTransaction(
+//             amount: amountInCents,
+//             category: selectedCategory,
+//             note: note.isEmpty ? "-" : note,
+//             paymentMethod: selectedPaymentMethod,
+//             type: selectedType,
+//             frequency: selectedFrequency,
+//             startDate: startDate,
+//             endDate: hasEndDate ? endDate : nil
+//         )
+//
+//         store.recurringTransactions.append(recurring)
+//         dismiss()
+//     }
+// }

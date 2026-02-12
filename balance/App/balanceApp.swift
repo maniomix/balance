@@ -4,19 +4,19 @@ import FirebaseCore
 @main
 struct BalanceApp: App {
     @StateObject private var authManager = AuthManager()
-    @AppStorage("appLanguage") private var appLanguage: String = "en"
+    @AppStorage("app.theme") private var selectedTheme: String = "dark"
     
     init() {
-        // Configure Firebase FIRST - before any Firebase calls
         FirebaseApp.configure()
     }
     
     var body: some Scene {
         WindowGroup {
+            
             ContentView()
-                .preferredColorScheme(.dark)
-                .environment(\.locale, .init(identifier: appLanguage))
+                .preferredColorScheme(selectedTheme == "dark" ? .dark : .light)
                 .environmentObject(authManager)
+
         }
     }
 }

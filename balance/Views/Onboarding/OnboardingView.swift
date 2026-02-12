@@ -3,175 +3,157 @@ import SwiftUI
 struct OnboardingView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var currentPage = 0
-    @State private var showGetStarted = false
-    
-    private var pages: [OnboardingPage] {
-        [
-            OnboardingPage(
-                icon: "chart.bar.fill",
-                title: "Track Your Spending",
-                description: "Monitor your expenses and stay on top of your finances with ease.",
-                color: Color(hex: 0x667EEA)
-            ),
-            OnboardingPage(
-                icon: "dollarsign.circle.fill",
-                title: "Set Budgets",
-                description: "Create monthly budgets and never overspend again.",
-                color: Color(hex: 0x764BA2)
-            ),
-            OnboardingPage(
-                icon: "chart.line.uptrend.xyaxis",
-                title: "Visualize Insights",
-                description: "Get detailed analytics and insights into your spending habits.",
-                color: Color(hex: 0x667EEA)
-            ),
-            OnboardingPage(
-                icon: "icloud.fill",
-                title: "Sync Everywhere",
-                description: "Your data syncs automatically across all your devices.",
-                color: Color(hex: 0x764BA2)
-            )
-        ]
-    }
     
     var body: some View {
         ZStack {
             // Background
-            Color.black.ignoresSafeArea()
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Skip button
-                HStack {
-                    Spacer()
-                    Button {
-                        completeOnboarding()
-                    } label: {
-                        Text("Skip")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                    }
-                }
-                .padding(.top, 16)
-                .opacity(currentPage < pages.count - 1 ? 1 : 0)
-                
-                // Content
+                // Pages
                 TabView(selection: $currentPage) {
-                    ForEach(0..<pages.count, id: \.self) { index in
-                        OnboardingPageView(page: pages[index])
-                            .tag(index)
-                    }
+                    OnboardingPage(
+                        icon: "chart.bar.fill",
+                        iconColor: Color(hexValue: 0x667EEA),
+                        title: "Track Your Finances",
+                        description: "Effortlessly monitor your income, expenses, and budget in one place."
+                    )
+                    .tag(0)
+                    
+                    OnboardingPage(
+                        icon: "sparkles",
+                        iconColor: Color(hexValue: 0xFF9F0A),
+                        title: "Smart Insights",
+                        description: "Get AI-powered analysis and recommendations to improve your financial health."
+                    )
+                    .tag(1)
+                    
+                    OnboardingPage(
+                        icon: "icloud.fill",
+                        iconColor: Color(hexValue: 0x3498DB),
+                        title: "Sync Everywhere",
+                        description: "Your data syncs seamlessly across all your devices with secure cloud backup."
+                    )
+                    .tag(2)
+                    
+                    OnboardingPage(
+                        icon: "lock.shield.fill",
+                        iconColor: Color(hexValue: 0x2ED573),
+                        title: "Privacy First",
+                        description: "Your financial data is encrypted and stays private. We never see your information."
+                    )
+                    .tag(3)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: currentPage)
                 
-                // Page indicators
+                // Page Indicators
                 HStack(spacing: 8) {
-                    ForEach(0..<pages.count, id: \.self) { index in
+                    ForEach(0..<4) { index in
                         Circle()
-                            .fill(currentPage == index ? .white : .white.opacity(0.3))
+                            .fill(index == currentPage ? Color(hexValue: 0x667EEA) : Color(uiColor: .tertiaryLabel))
                             .frame(width: 8, height: 8)
-                            .scaleEffect(currentPage == index ? 1.2 : 1.0)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: currentPage)
+                            .animation(.spring(response: 0.3), value: currentPage)
                     }
                 }
-                .padding(.bottom, 32)
+                .padding(.bottom, 24)
                 
-                // Get Started button
-                Button {
-                    if currentPage < pages.count - 1 {
-                        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                            currentPage += 1
+                // Buttons
+                VStack(spacing: 12) {
+                    if currentPage == 3 {
+                        // Get Started Button
+                        Button {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                hasCompletedOnboarding = true
+                            }
+                        } label: {
+                            Text("Get Started")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 52)
+                                .background(Color(hexValue: 0x667EEA))
+                                .foregroundStyle(.white)
+                                .cornerRadius(12)
                         }
                     } else {
-                        completeOnboarding()
+                        // Next Button
+                        Button {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                currentPage += 1
+                            }
+                        } label: {
+                            Text("Next")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 52)
+                                .background(Color(hexValue: 0x667EEA))
+                                .foregroundStyle(.white)
+                                .cornerRadius(12)
+                        }
                     }
-                } label: {
-                    Text(currentPage < pages.count - 1 ? "Next" : "Get Started")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(.white)
-                        .cornerRadius(16)
+                    
+                    // Skip Button
+                    if currentPage < 3 {
+                        Button {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                hasCompletedOnboarding = true
+                            }
+                        } label: {
+                            Text("Skip")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Color(uiColor: .secondaryLabel))
+                        }
+                    }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 20)
                 .padding(.bottom, 40)
             }
         }
     }
-    
-    private func completeOnboarding() {
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-            hasCompletedOnboarding = true
-        }
-    }
 }
 
-// MARK: - Onboarding Page Model
+// MARK: - Onboarding Page
 
-struct OnboardingPage {
+struct OnboardingPage: View {
     let icon: String
+    let iconColor: Color
     let title: String
     let description: String
-    let color: Color
-}
-
-// MARK: - Onboarding Page View
-
-struct OnboardingPageView: View {
-    let page: OnboardingPage
-    @State private var appeared = false
     
     var body: some View {
-        VStack(spacing: 40) {
+        VStack(spacing: 32) {
             Spacer()
             
             // Icon
             ZStack {
                 Circle()
-                    .fill(page.color.opacity(0.2))
-                    .frame(width: 140, height: 140)
-                    .blur(radius: 40)
+                    .fill(iconColor.opacity(0.15))
+                    .frame(width: 120, height: 120)
                 
-                Image(systemName: page.icon)
-                    .font(.system(size: 80, weight: .medium))
-                    .foregroundStyle(.white)
+                Image(systemName: icon)
+                    .font(.system(size: 50))
+                    .foregroundStyle(iconColor)
             }
-            .scaleEffect(appeared ? 1 : 0.5)
-            .opacity(appeared ? 1 : 0)
             
-            // Text
             VStack(spacing: 16) {
-                Text(page.title)
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white)
+                // Title
+                Text(title)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(uiColor: .label))
                     .multilineTextAlignment(.center)
                 
-                Text(page.description)
-                    .font(.system(size: 17))
-                    .foregroundStyle(.white.opacity(0.7))
+                // Description
+                Text(description)
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color(uiColor: .secondaryLabel))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
-            .opacity(appeared ? 1 : 0)
-            .offset(y: appeared ? 0 : 20)
             
             Spacer()
         }
-        .onAppear {
-            withAnimation(.spring(response: 0.8, dampingFraction: 0.7).delay(0.1)) {
-                appeared = true
-            }
-        }
-        .onDisappear {
-            appeared = false
-        }
     }
 }
-
-// MARK: - Preview
 
 #Preview {
     OnboardingView()

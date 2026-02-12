@@ -86,8 +86,8 @@ struct ProfileView: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color(hex: 0x667EEA),
-                                    Color(hex: 0x764BA2)
+                                    Color(hexValue: 0x667EEA),
+                                    Color(hexValue: 0x764BA2)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -258,7 +258,7 @@ struct ProfileView: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 16))
-                .foregroundStyle(Color(hex: 0x667EEA))
+                .foregroundStyle(Color(hexValue: 0x667EEA))
                 .frame(width: 24)
             
             VStack(alignment: .leading, spacing: 2) {
@@ -385,7 +385,7 @@ struct ProfileView: View {
                             showEditName = false
                         }
                     }
-                    .foregroundStyle(Color(hex: 0x667EEA))
+                    .foregroundStyle(Color(hexValue: 0x667EEA))
                     .disabled(isSavingProfile)
                 }
             }
@@ -653,7 +653,7 @@ struct ExportDataView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack {
                             Image(systemName: "arrow.right.circle.fill")
-                                .foregroundStyle(Color(hex: 0x667EEA))
+                                .foregroundStyle(Color(hexValue: 0x667EEA))
                                 .font(.system(size: 20))
                             
                             Text("How to Export")
@@ -692,12 +692,12 @@ struct ExportDataView: View {
     private func instructionRow(number: String, text: String) -> some View {
         HStack(spacing: 12) {
             Circle()
-                .fill(Color(hex: 0x667EEA).opacity(0.2))
+                .fill(Color(hexValue: 0x667EEA).opacity(0.2))
                 .frame(width: 28, height: 28)
                 .overlay(
                     Text(number)
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color(hex: 0x667EEA))
+                        .foregroundStyle(Color(hexValue: 0x667EEA))
                 )
             
             Text(text)

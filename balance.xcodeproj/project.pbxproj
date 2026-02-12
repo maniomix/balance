@@ -42,7 +42,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		3CEB5E882F19CD1500E284B8 /* Exceptions for "balance" folder in "balance" target */ = {
+		3C08593A2F3D34D30065D7FD /* Exceptions for "balance" folder in "balance" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -55,7 +55,7 @@
 		3C4B992F2F047DB8003DAE43 /* balance */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				3CEB5E882F19CD1500E284B8 /* Exceptions for "balance" folder in "balance" target */,
+				3C08593A2F3D34D30065D7FD /* Exceptions for "balance" folder in "balance" target */,
 			);
 			path = balance;
 			sourceTree = "<group>";
@@ -171,8 +171,6 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
-				de,
-				es,
 				Base,
 			);
 			mainGroup = 3C4B99242F047DB8003DAE43;
@@ -344,7 +342,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2645K3Q527;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				GENERATE_PKGINFO_FILE = NO;
 				INFOPLIST_FILE = balance/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Balance;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
@@ -389,7 +388,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2645K3Q527;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				GENERATE_PKGINFO_FILE = NO;
 				INFOPLIST_FILE = balance/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Balance;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";

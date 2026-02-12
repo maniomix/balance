@@ -31,7 +31,7 @@ struct AdvancedChartsView: View {
                 .padding()
             }
             .background(DS.Colors.bg.ignoresSafeArea())
-            .navigationTitle(L10n.t("charts.title"))
+            .navigationTitle("Charts")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -91,7 +91,7 @@ struct AdvancedChartsView: View {
                         .font(.system(size: 20))
                         .foregroundStyle(DS.Colors.accent)
                     
-                    Text(L10n.t("charts.spending_trend"))
+                    Text("Spending Trend")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(DS.Colors.text)
                     
@@ -113,7 +113,7 @@ struct AdvancedChartsView: View {
                         .font(.system(size: 20))
                         .foregroundStyle(DS.Colors.accent)
                     
-                    Text(L10n.t("charts.category_pie"))
+                    Text("Category Breakdown")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(DS.Colors.text)
                     
@@ -135,7 +135,7 @@ struct AdvancedChartsView: View {
                         .font(.system(size: 20))
                         .foregroundStyle(DS.Colors.accent)
                     
-                    Text(L10n.t("charts.income_expense"))
+                    Text("Income vs Expense")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(DS.Colors.text)
                     
@@ -157,7 +157,7 @@ struct AdvancedChartsView: View {
                         .font(.system(size: 20))
                         .foregroundStyle(DS.Colors.accent)
                     
-                    Text(L10n.t("charts.monthly_comparison"))
+                    Text("Monthly Comparison")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(DS.Colors.text)
                     
@@ -181,9 +181,9 @@ enum ChartPeriod: CaseIterable {
     
     var displayName: String {
         switch self {
-        case .last3Months: return L10n.t("charts.last_3_months")
-        case .last6Months: return L10n.t("charts.last_6_months")
-        case .thisYear: return L10n.t("charts.this_year")
+        case .last3Months: return "Last 3 Months"
+        case .last6Months: return "Last 6 Months"
+        case .thisYear: return "This Year"
         }
     }
     

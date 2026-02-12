@@ -1,6 +1,5 @@
 import SwiftUI
 import FirebaseAuth
-import LocalAuthentication
 
 struct UltimateSignUpView: View {
     @EnvironmentObject private var authManager: AuthManager
@@ -21,43 +20,45 @@ struct UltimateSignUpView: View {
     
     var body: some View {
         ZStack {
-            // Background
-            UltimateAuthComponents.AnimatedGradientBackground()
+            // Background - Same as App
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
             
-            // Content - Centered Vertically
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Dynamic top spacer to center content
-                        Spacer()
-                            .frame(minHeight: 0)
-                        
-                        VStack(spacing: 32) {
-                            logoSection
-                            signUpCard
-                                .padding(.horizontal, 24)
-                            socialSection
-                                .padding(.horizontal, 24)
-                            signInLink
-                        }
-                        .frame(minHeight: geometry.size.height)
-                        
-                        // Dynamic bottom spacer
-                        Spacer()
-                            .frame(minHeight: 0)
-                    }
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 40)
+                    
+                    // Logo
+                    logoSection
+                        .padding(.bottom, 32)
+                    
+                    // SignUp Card
+                    signUpCard
+                        .padding(.horizontal, 20)
+                    
+                    // Divider
+                    orDivider
+                        .padding(.vertical, 24)
+                        .padding(.horizontal, 20)
+                    
+                    // Social SignUp
+                    socialButtons
+                        .padding(.horizontal, 20)
+                    
+                    // Sign In Link
+                    signInLink
+                        .padding(.top, 32)
+                    
+                    Spacer().frame(height: 40)
                 }
             }
             
             if isLoading {
-                UltimateAuthComponents.AuthLoadingOverlay(message: "Creating account...")
+                loadingOverlay
             }
         }
-        .ignoresSafeArea()
         .alert("Sign Up Error", isPresented: $showSocialError) {
-            Button("OK") {
-                showSocialError = false
-            }
+            Button("OK") { }
         } message: {
             Text(socialErrorMessage)
         }
@@ -66,173 +67,258 @@ struct UltimateSignUpView: View {
     // MARK: - Logo
     
     private var logoSection: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
+            // App Icon
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .frame(width: 60, height: 60)
+                
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Color(uiColor: .label))
+            }
+            
             Text("Balance")
-                .font(.system(size: 42, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(Color(uiColor: .label))
             
             Text("Create your account")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 14))
+                .foregroundStyle(Color(uiColor: .secondaryLabel))
         }
     }
     
-    // MARK: - Sign Up Card
+    // MARK: - SignUp Card
     
     private var signUpCard: some View {
-        UltimateAuthComponents.GlassCard {
-            VStack(spacing: 16) {
-                UltimateAuthComponents.FloatingTextField(
-                    text: $email,
-                    placeholder: "Email",
-                    icon: "envelope.fill",
-                    keyboardType: .emailAddress,
-                    showSecure: .constant(false)
-                )
+        VStack(spacing: 16) {
+            // Email
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Email")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color(uiColor: .label))
                 
-                UltimateAuthComponents.FloatingTextField(
-                    text: $password,
-                    placeholder: "Password",
-                    icon: "lock.fill",
-                    isSecure: true,
-                    showSecure: $showPassword
-                )
-                
-                UltimateAuthComponents.FloatingTextField(
-                    text: $confirmPassword,
-                    placeholder: "Confirm Password",
-                    icon: "lock.fill",
-                    isSecure: true,
-                    showSecure: $showConfirmPassword
-                )
-                
-                // Password Strength & Requirements
-                passwordValidation
-                
-                // Error
-                if showError {
-                    Text(errorText)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                        .transition(.scale.combined(with: .opacity))
+                HStack(spacing: 12) {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
+                        .frame(width: 20)
+                    
+                    TextField("your@email.com", text: $email)
+                        .font(.system(size: 16))
+                        .keyboardType(.emailAddress)
+                        .autocapitalization(.none)
+                        .textContentType(.emailAddress)
                 }
-                
-                if let error = authManager.errorMessage {
-                    Text(error)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                        .transition(.scale.combined(with: .opacity))
-                }
-                
-                // Sign Up Button
-                Button {
-                    signUp()
-                } label: {
-                    HStack(spacing: 10) {
-                        if isLoading {
-                            ProgressView()
-                                .tint(.black)
-                        } else {
-                            Text("Create Account")
-                                .font(.system(size: 17, weight: .semibold))
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(.white)
-                    .foregroundStyle(.black)
-                    .cornerRadius(16)
-                }
-                .disabled(isLoading || !isFormValid)
-                .opacity(isFormValid ? 1.0 : 0.5)
-                .padding(.top, 8)
+                .padding(14)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(uiColor: .separator), lineWidth: 1)
+                )
             }
-            .padding(22)
+            
+            // Password
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Password")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color(uiColor: .label))
+                
+                HStack(spacing: 12) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
+                        .frame(width: 20)
+                    
+                    if showPassword {
+                        TextField("At least 6 characters", text: $password)
+                            .font(.system(size: 16))
+                            .textContentType(.newPassword)
+                    } else {
+                        SecureField("At least 6 characters", text: $password)
+                            .font(.system(size: 16))
+                            .textContentType(.newPassword)
+                    }
+                    
+                    Button {
+                        showPassword.toggle()
+                    } label: {
+                        Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(Color(uiColor: .secondaryLabel))
+                    }
+                }
+                .padding(14)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(uiColor: .separator), lineWidth: 1)
+                )
+            }
+            
+            // Confirm Password
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Confirm Password")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color(uiColor: .label))
+                
+                HStack(spacing: 12) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
+                        .frame(width: 20)
+                    
+                    if showConfirmPassword {
+                        TextField("Re-enter password", text: $confirmPassword)
+                            .font(.system(size: 16))
+                            .textContentType(.newPassword)
+                    } else {
+                        SecureField("Re-enter password", text: $confirmPassword)
+                            .font(.system(size: 16))
+                            .textContentType(.newPassword)
+                    }
+                    
+                    Button {
+                        showConfirmPassword.toggle()
+                    } label: {
+                        Image(systemName: showConfirmPassword ? "eye.slash.fill" : "eye.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(Color(uiColor: .secondaryLabel))
+                    }
+                }
+                .padding(14)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(uiColor: .separator), lineWidth: 1)
+                )
+            }
+            
+            // Password Requirements
+            if !password.isEmpty {
+                passwordValidation
+            }
+            
+            // Error Messages
+            if showError {
+                Text(errorText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.scale.combined(with: .opacity))
+            }
+            
+            if let error = authManager.errorMessage {
+                Text(error)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.scale.combined(with: .opacity))
+            }
+            
+            // Create Account Button
+            Button {
+                signUp()
+            } label: {
+                HStack {
+                    if isLoading {
+                        ProgressView()
+                            .tint(Color(uiColor: .systemBackground))
+                    } else {
+                        Text("Create Account")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(Color(uiColor: .label))
+                .foregroundStyle(Color(uiColor: .systemBackground))
+                .cornerRadius(12)
+            }
+            .disabled(isLoading || !isFormValid)
+            .opacity(isFormValid ? 1.0 : 0.5)
+            .padding(.top, 8)
         }
+        .padding(20)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
     }
     
     // MARK: - Password Validation
     
     private var passwordValidation: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Strength Bar
-            if !password.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text("Password Strength:")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.7))
-                        
-                        Text(passwordStrengthText)
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(passwordStrengthColor)
-                    }
-                    
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(.white.opacity(0.1))
-                            
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(passwordStrengthColor)
-                                .frame(width: geo.size.width * passwordStrength)
-                                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: passwordStrength)
-                        }
-                    }
-                    .frame(height: 5)
-                }
-                .padding(.bottom, 4)
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            requirementRow(
+                met: password.count >= 6,
+                text: "At least 6 characters"
+            )
             
-            // Requirements
-            VStack(alignment: .leading, spacing: 6) {
-                requirementRow(
-                    met: password.count >= 6,
-                    text: "At least 6 characters"
-                )
-                
-                requirementRow(
-                    met: password == confirmPassword && !password.isEmpty,
-                    text: "Passwords match"
-                )
-            }
+            requirementRow(
+                met: password == confirmPassword && !password.isEmpty && !confirmPassword.isEmpty,
+                text: "Passwords match"
+            )
         }
     }
     
     private func requirementRow(met: Bool, text: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: met ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 11))
-                .foregroundStyle(met ? .green : .white.opacity(0.4))
+                .font(.system(size: 14))
+                .foregroundStyle(met ? .green : Color(uiColor: .tertiaryLabel))
             
             Text(text)
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.7))
+                .font(.system(size: 13))
+                .foregroundStyle(Color(uiColor: .secondaryLabel))
         }
     }
     
-    // MARK: - Social Section
+    // MARK: - Divider
     
-    private var socialSection: some View {
-        VStack(spacing: 14) {
-            HStack {
-                Rectangle()
-                    .fill(.white.opacity(0.15))
-                    .frame(height: 1)
-                Text("OR")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.horizontal, 10)
-                Rectangle()
-                    .fill(.white.opacity(0.15))
-                    .frame(height: 1)
-            }
+    private var orDivider: some View {
+        HStack {
+            Rectangle()
+                .fill(Color(uiColor: .separator))
+                .frame(height: 1)
             
-            HStack(spacing: 14) {
-                UltimateAuthComponents.SocialAuthButton(
-                    icon: "g.circle.fill",
-                    color: .white,
-                    action: signUpWithGoogle
+            Text("OR")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color(uiColor: .secondaryLabel))
+                .padding(.horizontal, 12)
+            
+            Rectangle()
+                .fill(Color(uiColor: .separator))
+                .frame(height: 1)
+        }
+    }
+    
+    // MARK: - Social Buttons
+    
+    private var socialButtons: some View {
+        VStack(spacing: 12) {
+            // Google Sign Up
+            Button {
+                signUpWithGoogle()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "g.circle.fill")
+                        .font(.system(size: 20))
+                    
+                    Text("Continue with Google")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .foregroundStyle(Color(uiColor: .label))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(uiColor: .separator), lineWidth: 1)
                 )
             }
         }
@@ -248,40 +334,35 @@ struct UltimateSignUpView: View {
         } label: {
             HStack(spacing: 4) {
                 Text("Already have an account?")
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Color(uiColor: .secondaryLabel))
                 Text("Sign In")
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color(hexValue: 0x667EEA))
             }
-            .font(.system(size: 14))
+            .font(.system(size: 15))
         }
     }
     
-    // MARK: - Password Strength
+    // MARK: - Loading Overlay
     
-    private var passwordStrength: Double {
-        var strength = 0.0
-        if password.count >= 6 { strength += 0.25 }
-        if password.count >= 8 { strength += 0.25 }
-        if password.rangeOfCharacter(from: .uppercaseLetters) != nil { strength += 0.15 }
-        if password.rangeOfCharacter(from: .lowercaseLetters) != nil { strength += 0.15 }
-        if password.rangeOfCharacter(from: .decimalDigits) != nil { strength += 0.1 }
-        if password.rangeOfCharacter(from: CharacterSet(charactersIn: "!@#$%^&*()")) != nil { strength += 0.1 }
-        return min(strength, 1.0)
-    }
-    
-    private var passwordStrengthText: String {
-        if passwordStrength < 0.3 { return "Weak" }
-        if passwordStrength < 0.6 { return "Fair" }
-        if passwordStrength < 0.8 { return "Good" }
-        return "Strong"
-    }
-    
-    private var passwordStrengthColor: Color {
-        if passwordStrength < 0.3 { return .red }
-        if passwordStrength < 0.6 { return .orange }
-        if passwordStrength < 0.8 { return .yellow }
-        return .green
+    private var loadingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                ProgressView()
+                    .scaleEffect(1.2)
+                    .tint(.white)
+                
+                Text("Creating account...")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+            .padding(24)
+            .background(.ultraThinMaterial)
+            .cornerRadius(16)
+        }
     }
     
     // MARK: - Validation
@@ -291,6 +372,8 @@ struct UltimateSignUpView: View {
         password.count >= 6 &&
         password == confirmPassword
     }
+    
+    // MARK: - Actions
     
     private func signUp() {
         showError = false
@@ -322,7 +405,6 @@ struct UltimateSignUpView: View {
         }
     }
     
-    
     private func signUpWithGoogle() {
         isLoading = true
         
@@ -332,12 +414,11 @@ struct UltimateSignUpView: View {
                 
                 await MainActor.run {
                     isLoading = false
-                    // AuthManager will handle the auth state change
                 }
             } catch {
                 await MainActor.run {
                     isLoading = false
-                    socialErrorMessage = "Google Sign In failed. Please try again."
+                    socialErrorMessage = "Google Sign Up failed. Please try again."
                     showSocialError = true
                 }
             }

@@ -1,4 +1,4 @@
-import Foundation
+/*import Foundation
 
 // MARK: - Recurring Transaction Manager
 
@@ -20,7 +20,7 @@ struct RecurringTransactionManager {
                 amount: recurring.amount,
                 date: today,
                 category: recurring.category,
-                note: recurring.note.isEmpty ? "\(L10n.t("recurring.auto_generated")) - \(recurring.frequency.displayName)" : recurring.note,
+                note: recurring.note.isEmpty ? "Auto-generated - \(recurring.frequency.displayName)" : recurring.note,
                 paymentMethod: recurring.paymentMethod,
                 type: recurring.type
             )
@@ -93,4 +93,4 @@ struct RecurringTransactionManager {
         
         return (income, expense)
     }
-}
+}*/
