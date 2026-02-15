@@ -7,7 +7,6 @@ struct CurrencyTextField: View {
     @FocusState.Binding var isFocused: Bool
     
     @State private var internalText: String = ""
-    @State private var textWidth: CGFloat = 0
     
     private var currencySymbol: String {
         DS.Format.currencySymbol()
@@ -15,65 +14,44 @@ struct CurrencyTextField: View {
     
     var body: some View {
         ZStack(alignment: .leading) {
-            // Hidden text to measure width
-            Text(internalText)
+            TextField("", text: $internalText)
+                .keyboardType(.decimalPad)
                 .font(DS.Typography.number)
-                .opacity(0)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.onAppear {
-                            textWidth = geo.size.width
-                        }
-                        .onChange(of: internalText) { _, _ in
-                            textWidth = geo.size.width
-                        }
+                .foregroundColor(.clear) // Hide the actual text
+                .tint(.clear) // Hide cursor
+                .focused($isFocused)
+                .onChange(of: internalText) { oldValue, newValue in
+                    updateText(newValue)
+                }
+                .onChange(of: text) { oldValue, newValue in
+                    if newValue.isEmpty && !internalText.isEmpty {
+                        internalText = ""
                     }
-                )
+                }
+                .onAppear {
+                    if !text.isEmpty {
+                        internalText = formatForDisplay(text)
+                    }
+                }
             
-            HStack(spacing: 0) {
-                TextField("", text: $internalText)
-                    .keyboardType(.decimalPad)
+            HStack(spacing: 4) {
+                // Show the formatted text
+                Text(internalText.isEmpty ? placeholder : internalText)
                     .font(DS.Typography.number)
-                    .foregroundColor(.clear) // Hide the actual text
-                    .focused($isFocused)
-                    .onChange(of: internalText) { oldValue, newValue in
-                        updateText(newValue)
-                    }
-                    .onChange(of: text) { oldValue, newValue in
-                        if newValue.isEmpty && !internalText.isEmpty {
-                            internalText = ""
-                        }
-                    }
-                    .onAppear {
-                        if !text.isEmpty {
-                            internalText = formatForDisplay(text)
-                        }
-                    }
+                    .foregroundColor(internalText.isEmpty ? DS.Colors.subtext : DS.Colors.text)
+                
+                // Currency symbol next to text
+                if !internalText.isEmpty {
+                    Text(currencySymbol)
+                        .font(DS.Typography.number)
+                        .foregroundColor(DS.Colors.text)
+                        .transition(.opacity)
+                }
                 
                 Spacer()
             }
-            .overlay(
-                HStack(spacing: 4) {
-                    // Show the formatted text
-                    Text(internalText.isEmpty ? placeholder : internalText)
-                        .font(DS.Typography.number)
-                        .foregroundColor(internalText.isEmpty ? DS.Colors.subtext : DS.Colors.text)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: internalText)
-                    
-                    // Currency symbol next to text
-                    if !internalText.isEmpty {
-                        Text(currencySymbol)
-                            .font(DS.Typography.number)
-                            .foregroundColor(DS.Colors.text.opacity(0.6))
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.leading, 12)
-                .allowsHitTesting(false)
-                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: internalText.isEmpty)
-            )
+            .padding(.leading, 12)
+            .allowsHitTesting(false)
         }
         .frame(height: 44)
         .padding(.horizontal, 12)
@@ -86,19 +64,16 @@ struct CurrencyTextField: View {
     }
     
     private func updateText(_ newValue: String) {
-        let withoutSeparators = newValue.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".")
-        let cleaned = cleanInput(withoutSeparators)
+        let withoutSeparators = newValue
+            .replacingOccurrences(of: ".", with: "")
+            .replacingOccurrences(of: ",", with: ".")
         
-        // Animate the change
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-            text = cleaned
-        }
+        let cleaned = cleanInput(withoutSeparators)
+        text = cleaned
         
         let formatted = formatForDisplay(cleaned)
         if formatted != internalText {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                internalText = formatted
-            }
+            internalText = formatted
         }
     }
     
@@ -174,6 +149,7 @@ struct CompactCurrencyTextField: View {
                 .keyboardType(.decimalPad)
                 .font(DS.Typography.number)
                 .foregroundColor(.clear)
+                .tint(.clear) // Hide cursor
                 .multilineTextAlignment(.trailing)
                 .focused($isFocused)
                 .onChange(of: internalText) { oldValue, newValue in
@@ -196,17 +172,15 @@ struct CompactCurrencyTextField: View {
                 Text(internalText.isEmpty ? "0" : internalText)
                     .font(DS.Typography.number)
                     .foregroundColor(internalText.isEmpty ? DS.Colors.subtext : DS.Colors.text)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: internalText)
                 
                 if !internalText.isEmpty {
                     Text(currencySymbol)
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(DS.Colors.text.opacity(0.5))
-                        .transition(.scale.combined(with: .opacity))
+                        .foregroundStyle(DS.Colors.text)
+                        .transition(.opacity)
                 }
             }
             .allowsHitTesting(false)
-            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: internalText.isEmpty)
         }
         .padding(10)
         .frame(width: 120)
@@ -218,18 +192,16 @@ struct CompactCurrencyTextField: View {
     }
     
     private func updateText(_ newValue: String) {
-        let withoutSeparators = newValue.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".")
-        let cleaned = cleanInput(withoutSeparators)
+        let withoutSeparators = newValue
+            .replacingOccurrences(of: ".", with: "")
+            .replacingOccurrences(of: ",", with: ".")
         
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-            text = cleaned
-        }
+        let cleaned = cleanInput(withoutSeparators)
+        text = cleaned
         
         let formatted = formatForDisplay(cleaned)
         if formatted != internalText {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                internalText = formatted
-            }
+            internalText = formatted
         }
     }
     

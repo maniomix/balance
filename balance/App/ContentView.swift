@@ -1432,28 +1432,6 @@ private struct TransactionsView: View {
     @State private var maxAmountText = ""
     @State private var editingTxID: UUID? = nil
     @State private var showImport = false
-    
-    // Sort state
-    @State private var sortBy: SortOption = .dateNewest
-    @State private var showSortMenu = false
-    
-    enum SortOption: String, CaseIterable, Hashable {
-        case dateNewest = "Date (Newest First)"
-        case dateOldest = "Date (Oldest First)"
-        case amountHighest = "Amount (Highest First)"
-        case amountLowest = "Amount (Lowest First)"
-        case category = "Category (A-Z)"
-        
-        var icon: String {
-            switch self {
-            case .dateNewest: return "calendar.badge.clock"
-            case .dateOldest: return "calendar"
-            case .amountHighest: return "arrow.down.circle"
-            case .amountLowest: return "arrow.up.circle"
-            case .category: return "tag"
-            }
-        }
-    }
 
     // --- Multi-select state for Transactions screen ---
     @State private var isSelecting = false
@@ -1547,19 +1525,7 @@ private struct TransactionsView: View {
             out = out.filter { $0.date >= start && $0.date < end }
         }
 
-        // Apply sorting
-        switch sortBy {
-        case .dateNewest:
-            return out.sorted { $0.date > $1.date }
-        case .dateOldest:
-            return out.sorted { $0.date < $1.date }
-        case .amountHighest:
-            return out.sorted { $0.amount > $1.amount }
-        case .amountLowest:
-            return out.sorted { $0.amount < $1.amount }
-        case .category:
-            return out.sorted { $0.category.title < $1.category.title }
-        }
+        return out.sorted { $0.date > $1.date }  // Sort by date descending
     }
 
     private var activeFilterCount: Int {
@@ -1625,11 +1591,6 @@ private struct TransactionsView: View {
                 .sheet(isPresented: $showAdd) {
                     AddTransactionSheet(store: $store, initialMonth: store.selectedMonth)
                         .presentationDetents([.medium, .large])
-                        .presentationDragIndicator(.visible)
-                }
-                .sheet(isPresented: $showSortMenu) {
-                    SortMenuSheet(selectedSort: $sortBy)
-                        .presentationDetents([.height(400)])
                         .presentationDragIndicator(.visible)
                 }
                 .fullScreenCover(item: editingWrapper) { wrapper in
@@ -1743,13 +1704,11 @@ private struct TransactionsView: View {
                 transactionsList
             }
         }
-        .id(sortBy)  // Force refresh when sort changes
         .scrollContentBackground(.hidden)
         .listStyle(.plain)
         .animation(uiAnim, value: filtered)
         .animation(uiAnim, value: activeFilterCount)
         .animation(uiAnim, value: store.transactions)
-        .animation(uiAnim, value: sortBy)
         .onChange(of: search) { oldValue, newValue in
             // Reset to This Month when search is cleared
             if newValue.isEmpty && searchScope == .allTime {
@@ -1829,23 +1788,16 @@ private struct TransactionsView: View {
                 .listRowBackground(DS.Colors.bg)
             }
             
-            // Transactions grouped by day (only for date sorting)
-            if sortBy == .dateNewest || sortBy == .dateOldest {
-                ForEach(Analytics.groupedByDay(filtered), id: \.day) { group in
-                    Section {
-                        ForEach(group.items) { t in
-                            transactionRowView(for: t)
-                        }
-                    } header: {
-                        Text(group.title)
-                            .font(DS.Typography.caption)
-                            .foregroundStyle(DS.Colors.subtext)
+            // Transactions grouped by day
+            ForEach(Analytics.groupedByDay(filtered), id: \.day) { group in
+                Section {
+                    ForEach(group.items) { t in
+                        transactionRowView(for: t)
                     }
-                }
-            } else {
-                // For amount/category sorting, show flat list
-                ForEach(filtered) { t in
-                    transactionRowView(for: t)
+                } header: {
+                    Text(group.title)
+                        .font(DS.Typography.caption)
+                        .foregroundStyle(DS.Colors.subtext)
                 }
             }
         }
@@ -2038,11 +1990,12 @@ private struct TransactionsView: View {
                 filtersActive: activeFilterCount > 0,
                 showImport: $showImport,
                 showFilters: $showFilters,
-                showAdd: $showAdd,
-                showSortMenu: $showSortMenu,
-                disabled: store.budgetTotal <= 0,
+                showAdd: $showAdd
+                // showRecurring: $showRecurring,  // ← COMMENTED OUT - باگ داره
+                , disabled: store.budgetTotal <= 0,
                 uiAnim: uiAnim
             )
+            .padding(.trailing, 6)
         }
     }
 
@@ -2062,7 +2015,6 @@ private struct TransactionsTrailingButtons: View {
     @Binding var showImport: Bool
     @Binding var showFilters: Bool
     @Binding var showAdd: Bool
-    @Binding var showSortMenu: Bool
     // @Binding var showRecurring: Bool  // ← COMMENTED OUT - باگ داره
     let disabled: Bool
     let uiAnim: Animation
@@ -2080,16 +2032,6 @@ private struct TransactionsTrailingButtons: View {
             //         .frame(width: 36, height: 36)
             // }
             //.buttonStyle(.plain)
-            
-            // Sort button
-            Button { showSortMenu = true } label: {
-                Image(systemName: "arrow.up.arrow.down.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(DS.Colors.text)
-                    .frame(width: 36, height: 36)
-            }
-            .buttonStyle(.plain)
-            .disabled(disabled)
             
             Button { showImport = true } label: {
                 Image(systemName: "square.and.arrow.down")
@@ -2138,61 +2080,6 @@ private struct ImportTransactionsSheet: View {
 
     var body: some View {
         ImportTransactionsScreen(store: $store)
-    }
-}
-
-
-// MARK: - Sort Menu Sheet
-private struct SortMenuSheet: View {
-    @Binding var selectedSort: TransactionsView.SortOption
-    @Environment(\.dismiss) private var dismiss
-    
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(TransactionsView.SortOption.allCases, id: \.self) { option in
-                    Button {
-                        selectedSort = option
-                        Haptics.selection()
-                        dismiss()
-                    } label: {
-                        HStack {
-                            Image(systemName: option.icon)
-                                .font(.system(size: 18))
-                                .foregroundStyle(DS.Colors.accent)
-                                .frame(width: 32)
-                            
-                            Text(option.rawValue)
-                                .font(DS.Typography.body)
-                                .foregroundStyle(DS.Colors.text)
-                            
-                            Spacer()
-                            
-                            if selectedSort == option {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(DS.Colors.positive)
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    }
-                    .listRowBackground(DS.Colors.surface)
-                }
-            }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(DS.Colors.bg)
-            .navigationTitle("Sort By")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundStyle(DS.Colors.accent)
-                }
-            }
-        }
     }
 }
 
@@ -2435,7 +2322,7 @@ private struct TransactionsFilterSheet: View {
                                         Text("Min")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
-                                        TextField(DS.Format.currencySymbol() + " 0", text: $minAmountText)
+                                        TextField("0.00", text: $minAmountText)
                                             .keyboardType(.decimalPad)
                                             .font(DS.Typography.number)
                                             .padding(10)
@@ -2450,7 +2337,7 @@ private struct TransactionsFilterSheet: View {
                                         Text("Max")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
-                                        TextField(DS.Format.currencySymbol() + " 1000", text: $maxAmountText)
+                                        TextField("0.00", text: $maxAmountText)
                                             .keyboardType(.decimalPad)
                                             .font(DS.Typography.number)
                                             .padding(10)
@@ -2530,7 +2417,6 @@ private struct BudgetView: View {
     @State private var showAddCategory = false
     @State private var newCategoryName = ""
     @FocusState private var focus: Bool
-    @FocusState private var categoryFocus: Category?
 
     var body: some View {
         NavigationStack {
@@ -2667,7 +2553,7 @@ private struct BudgetView: View {
                                             }
                                             Spacer()
 
-                                            TextField(DS.Format.currencySymbol() + " 0", text: Binding(
+                                            TextField("0.00", text: Binding(
                                                 get: { editingCategoryBudgets[c] ?? "" },
                                                 set: { newVal in
                                                     editingCategoryBudgets[c] = newVal
@@ -6970,26 +6856,23 @@ enum DS {
             return fmt.localizedString(for: date, relativeTo: Date())
         }
         
-        /// Get current currency symbol
+        /// Returns currency symbol (€, $, £, etc.)
         static func currencySymbol() -> String {
             let currencyCode = UserDefaults.standard.string(forKey: "app.currency") ?? "EUR"
+            
             switch currencyCode {
             case "EUR": return "€"
             case "USD": return "$"
             case "GBP": return "£"
             case "JPY": return "¥"
             case "CAD": return "C$"
-            case "CHF": return "Fr"
-            case "AUD": return "A$"
-            case "INR": return "₹"
             default: return currencyCode
             }
         }
         
-        /// Get placeholder for amount input
+        /// Returns formatted placeholder (e.g., "€ 250")
         static func amountPlaceholder() -> String {
-            let symbol = currencySymbol()
-            return "\(symbol) 250"
+            return "\(currencySymbol()) 250"
         }
     }
 }
@@ -8074,8 +7957,7 @@ enum Analytics {
 
         return groups
             .map { (day, items) in
-                // Don't sort items here - keep original order from input
-                DayGroup(day: day, title: fmt.string(from: day), items: items)
+                DayGroup(day: day, title: fmt.string(from: day), items: items.sorted { $0.date > $1.date })
             }
             .sorted { $0.day > $1.day }
     }
