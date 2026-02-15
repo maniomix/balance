@@ -10,12 +10,76 @@ class FirestoreManager: ObservableObject {
     @Published var isSyncing = false
     @Published var lastSyncDate: Date?
     @Published var syncError: String?
+    @Published var lastSyncTime: Date? // For compatibility
+    
+    private var syncListener: ListenerRegistration?
+    private var currentUserId: String?
     
     // MARK: - User Document Path
     
     private func userDocumentRef() -> DocumentReference? {
         guard let userId = Auth.auth().currentUser?.uid else { return nil }
         return db.collection("users").document(userId)
+    }
+    
+    // MARK: - Real-time Listener
+    
+    func startRealtimeSync(userId: String, onUpdate: @escaping (Store) -> Void) {
+        // Remove old listener
+        stopRealtimeSync()
+        
+        currentUserId = userId
+        let userDoc = db.collection("users").document(userId)
+        
+        syncListener = userDoc.addSnapshotListener { [weak self] snapshot, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("❌ Real-time sync error: \(error.localizedDescription)")
+                Task { @MainActor in
+                    self.syncError = error.localizedDescription
+                }
+                return
+            }
+            
+            guard let snapshot = snapshot,
+                  snapshot.exists,
+                  let storeData = snapshot.data()?["store"] as? [String: Any] else {
+                print("⚠️ No store data in snapshot")
+                return
+            }
+            
+            do {
+                // Convert dictionary to Store
+                let jsonData = try JSONSerialization.data(withJSONObject: storeData)
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                let remoteStore = try decoder.decode(Store.self, from: jsonData)
+                
+                Task { @MainActor in
+                    print("🔄 Real-time update received")
+                    print("   Transactions: \(remoteStore.transactions.count)")
+                    onUpdate(remoteStore)
+                    self.lastSyncDate = Date()
+                    self.lastSyncTime = Date()
+                    self.syncError = nil
+                }
+            } catch {
+                print("❌ Failed to decode: \(error.localizedDescription)")
+                Task { @MainActor in
+                    self.syncError = "Decode error: \(error.localizedDescription)"
+                }
+            }
+        }
+        
+        print("✅ Started real-time sync for user: \(userId)")
+    }
+    
+    func stopRealtimeSync() {
+        syncListener?.remove()
+        syncListener = nil
+        currentUserId = nil
+        print("🛑 Stopped real-time sync")
     }
     
     // MARK: - Save Store to Firestore
@@ -58,6 +122,7 @@ class FirestoreManager: ObservableObject {
             print("✅ Store saved successfully")
             
             lastSyncDate = Date()
+            lastSyncTime = Date()
             isSyncing = false
         } catch let error as NSError {
             print("❌ Save error: \(error)")

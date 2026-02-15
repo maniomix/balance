@@ -15,6 +15,7 @@ import FirebaseAuth
 
 struct ContentView: View {
     @State private var store: Store = Store()
+    @State private var autoSyncTask: Task<Void, Never>? = nil
     @State private var selectedTab: Tab = .dashboard
     @State private var showLaunchScreen = true
     @AppStorage("app.theme") private var selectedTheme: String = "dark"
@@ -154,6 +155,37 @@ struct ContentView: View {
                     saveStore()
                 }
             }
+            // Auto-sync to Firestore whenever store changes
+            .onChange(of: store) { _, newStore in
+                autoSyncTask?.cancel()
+                autoSyncTask = Task {
+                    // Debounce: wait 2 seconds before syncing
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    
+                    guard !Task.isCancelled else { return }
+                    guard let userId = authManager.currentUser?.uid else {
+                        print("⚠️ No user ID - skipping auto-sync")
+                        return
+                    }
+                    
+                    // Save locally first
+                    newStore.save(userId: userId)
+                    
+                    // Then sync to Firestore
+                    do {
+                        try await firestoreManager.saveStore(newStore, userId: userId)
+                        print("✅ Auto-synced to Firestore")
+                    } catch let error as NSError {
+                        print("❌ Auto-sync failed:")
+                        print("   Error code: \(error.code)")
+                        print("   Domain: \(error.domain)")
+                        print("   Description: \(error.localizedDescription)")
+                        if error.code == 7 {
+                            print("   ⚠️ Permission denied - check Firestore Rules")
+                        }
+                    }
+                }
+            }
             .tint(DS.Colors.accent)
             .id(uiRefreshID)
         
@@ -164,11 +196,20 @@ struct ContentView: View {
                         let syncedStore = try await firestoreManager.syncStore(store, userId: userId)
                         store = syncedStore
                         saveStore() // Save with userId
+                        
+                        // Start real-time listener for auto-sync from other devices
+                        firestoreManager.startRealtimeSync(userId: userId) { remoteStore in
+                            // Update local store when remote changes
+                            self.store = remoteStore
+                            self.store.save(userId: userId)
+                            print("📱 Store updated from another device")
+                        }
                     } catch {
                         print("Sync error: \(error)")
                     }
                 } else {
-                    // User logged out - reset store
+                    // User logged out - stop listener and reset store
+                    firestoreManager.stopRealtimeSync()
                     store = Store()
                     showLaunchScreen = true
                 }
@@ -2433,11 +2474,18 @@ private struct BudgetView: View {
                                 .foregroundStyle(DS.Colors.subtext)
 
                             HStack(spacing: 10) {
-                                CurrencyTextField(
-                                    text: $editingTotal,
-                                    placeholder: DS.Format.amountPlaceholder(),
-                                    isFocused: $focus
-                                )
+                                TextField("e.g. 3000.00", text: $editingTotal)
+                                    .keyboardType(.decimalPad)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .focused($focus)
+                                    .font(DS.Typography.number)
+                                    .padding(11)
+                                    .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(DS.Colors.grid, lineWidth: 1)
+                                    )
 
                                 Button(store.budgetTotal <= 0 ? "Start" : "Update") {
                         
@@ -3729,6 +3777,57 @@ private struct SettingsView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    
+                    // Support & Account Deletion
+                    DS.Card {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "questionmark.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(DS.Colors.accent)
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Need Help or Want to Delete Account?")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(DS.Colors.text)
+                                    
+                                    Text("Contact our support team")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(DS.Colors.subtext)
+                                }
+                                
+                                Spacer()
+                            }
+                            
+                            Divider().overlay(DS.Colors.grid)
+                            
+                            Button {
+                                if let url = URL(string: "mailto:support@balanceapp.com?subject=Support%20Request") {
+                                    UIApplication.shared.open(url)
+                                }
+                                Haptics.light()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "envelope.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(DS.Colors.accent)
+                                    
+                                    Text("support@balanceapp.com")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(DS.Colors.accent)
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(DS.Colors.subtext)
+                                }
+                                .padding(12)
+                                .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                     
                     // Security Settings
                     
@@ -5845,8 +5944,6 @@ private struct TransactionFormCard: View {
 
     let categories: [Category]
     let onAddCategory: () -> Void
-    
-    @FocusState private var amountFocused: Bool
 
     var body: some View {
         DS.Card {
@@ -5907,11 +6004,15 @@ private struct TransactionFormCard: View {
                     .font(DS.Typography.caption)
                     .foregroundStyle(DS.Colors.subtext)
 
-                CurrencyTextField(
-                    text: $amountText,
-                    placeholder: DS.Format.amountPlaceholder(),
-                    isFocused: $amountFocused
-                )
+                TextField("e.g. 250.00", text: $amountText)
+                    .keyboardType(.decimalPad)
+                    .font(DS.Typography.number)
+                    .padding(12)
+                    .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(DS.Colors.grid, lineWidth: 1)
+                    )
 
                 Divider().overlay(DS.Colors.grid)
 
