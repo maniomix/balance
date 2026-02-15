@@ -633,6 +633,7 @@ private struct DashboardView: View {
     @State private var trendSelectedDay: Int? = nil
     @EnvironmentObject private var firestoreManager: FirestoreManager
     @EnvironmentObject private var authManager: AuthManager
+    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
 
     private var monthTitle: String {
         let fmt = DateFormatter()
@@ -663,6 +664,7 @@ private struct DashboardView: View {
     @State private var showDeleteMonthConfirm = false
     @State private var showTrashAlert = false
     @State private var trashAlertText = ""
+    @State private var showPaywall = false
 
     var body: some View {
         NavigationStack {
@@ -735,6 +737,14 @@ private struct DashboardView: View {
                 }
             }
         }
+        .onAppear {
+            // Load subscription status when dashboard appears
+            if let userId = authManager.currentUser?.uid {
+                Task {
+                    await SimpleSubscriptionManager.shared.loadSubscriptionStatus(userId: userId)
+                }
+            }
+        }
         .alert("Delete This Month", isPresented: $showDeleteMonthConfirm) {
             Button("Delete", role: .destructive) {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
@@ -748,7 +758,6 @@ private struct DashboardView: View {
                         try? await firestoreManager.saveStore(store, userId: userId)
                     }
                 }
-                
                 Haptics.success()
                 trashAlertText = "This month's data has been successfully deleted"
                 showTrashAlert = true
@@ -767,6 +776,9 @@ private struct DashboardView: View {
             AddTransactionSheet(store: $store, initialMonth: store.selectedMonth)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showPaywall) {
+            SimplePaywallView()
         }
     }
 
@@ -820,18 +832,70 @@ private struct DashboardView: View {
         let totalIncome = tx.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
         let hasSignificantIncome = totalIncome > store.budgetTotal * 10 / 100
         
-        return HStack(spacing: 12) {
-            KPI(title: "Spent", value: DS.Format.money(summary.totalSpent), isNegative: false)
-                .frame(maxWidth: .infinity)
-            KPI(
-                title: "Remaining",
-                value: DS.Format.money(summary.remaining),
-                isNegative: isOverBudget,
-                isPositive: !isOverBudget && hasSignificantIncome
-            )
-                .frame(maxWidth: .infinity)
-            KPI(title: "Daily avg", value: DS.Format.money(summary.dailyAvg), isNegative: false)
-                .frame(maxWidth: .infinity)
+        return VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                KPI(title: "Spent", value: DS.Format.money(summary.totalSpent), isNegative: false)
+                    .frame(maxWidth: .infinity)
+                KPI(
+                    title: "Remaining",
+                    value: DS.Format.money(summary.remaining),
+                    isNegative: isOverBudget,
+                    isPositive: !isOverBudget && hasSignificantIncome
+                )
+                    .frame(maxWidth: .infinity)
+                KPI(title: "Daily avg", value: DS.Format.money(summary.dailyAvg), isNegative: false)
+                    .frame(maxWidth: .infinity)
+            }
+            
+            // نمایش تعداد تراکنش‌های باقیمانده برای Free users
+            // MARK: - SUBSCRIPTION DISABLED - Uncomment to enable
+            /*
+            if !subscriptionManager.isPro {
+                // تعداد کل تراکنش‌ها (همه ماه‌ها)
+                let currentCount = store.transactions.count
+                let freeLimit = 50
+                let remaining = max(0, freeLimit - currentCount)
+                
+                HStack(spacing: 6) {
+                    Image(systemName: remaining > 10 ? "info.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(remaining > 10 ? DS.Colors.subtext : .orange)
+                    
+                    Text("\(currentCount) of \(freeLimit) free transactions used")
+                        .font(.system(size: 12))
+                        .foregroundColor(DS.Colors.subtext)
+                    
+                    Spacer()
+                    
+                    Button {
+                        showPaywall = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "crown.fill")
+                            Text("Go Pro")
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            LinearGradient(
+                                colors: [.yellow, .orange],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(8)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(DS.Colors.surface2)
+                )
+            }
+            */
         }
     }
 
@@ -1368,6 +1432,28 @@ private struct TransactionsView: View {
     @State private var maxAmountText = ""
     @State private var editingTxID: UUID? = nil
     @State private var showImport = false
+    
+    // Sort state
+    @State private var sortBy: SortOption = .dateNewest
+    @State private var showSortMenu = false
+    
+    enum SortOption: String, CaseIterable, Hashable {
+        case dateNewest = "Date (Newest First)"
+        case dateOldest = "Date (Oldest First)"
+        case amountHighest = "Amount (Highest First)"
+        case amountLowest = "Amount (Lowest First)"
+        case category = "Category (A-Z)"
+        
+        var icon: String {
+            switch self {
+            case .dateNewest: return "calendar.badge.clock"
+            case .dateOldest: return "calendar"
+            case .amountHighest: return "arrow.down.circle"
+            case .amountLowest: return "arrow.up.circle"
+            case .category: return "tag"
+            }
+        }
+    }
 
     // --- Multi-select state for Transactions screen ---
     @State private var isSelecting = false
@@ -1461,7 +1547,19 @@ private struct TransactionsView: View {
             out = out.filter { $0.date >= start && $0.date < end }
         }
 
-        return out.sorted { $0.date > $1.date }  // Sort by date descending
+        // Apply sorting
+        switch sortBy {
+        case .dateNewest:
+            return out.sorted { $0.date > $1.date }
+        case .dateOldest:
+            return out.sorted { $0.date < $1.date }
+        case .amountHighest:
+            return out.sorted { $0.amount > $1.amount }
+        case .amountLowest:
+            return out.sorted { $0.amount < $1.amount }
+        case .category:
+            return out.sorted { $0.category.title < $1.category.title }
+        }
     }
 
     private var activeFilterCount: Int {
@@ -1527,6 +1625,11 @@ private struct TransactionsView: View {
                 .sheet(isPresented: $showAdd) {
                     AddTransactionSheet(store: $store, initialMonth: store.selectedMonth)
                         .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
+                }
+                .sheet(isPresented: $showSortMenu) {
+                    SortMenuSheet(selectedSort: $sortBy)
+                        .presentationDetents([.height(400)])
                         .presentationDragIndicator(.visible)
                 }
                 .fullScreenCover(item: editingWrapper) { wrapper in
@@ -1640,11 +1743,13 @@ private struct TransactionsView: View {
                 transactionsList
             }
         }
+        .id(sortBy)  // Force refresh when sort changes
         .scrollContentBackground(.hidden)
         .listStyle(.plain)
         .animation(uiAnim, value: filtered)
         .animation(uiAnim, value: activeFilterCount)
         .animation(uiAnim, value: store.transactions)
+        .animation(uiAnim, value: sortBy)
         .onChange(of: search) { oldValue, newValue in
             // Reset to This Month when search is cleared
             if newValue.isEmpty && searchScope == .allTime {
@@ -1724,16 +1829,23 @@ private struct TransactionsView: View {
                 .listRowBackground(DS.Colors.bg)
             }
             
-            // Transactions grouped by day
-            ForEach(Analytics.groupedByDay(filtered), id: \.day) { group in
-                Section {
-                    ForEach(group.items) { t in
-                        transactionRowView(for: t)
+            // Transactions grouped by day (only for date sorting)
+            if sortBy == .dateNewest || sortBy == .dateOldest {
+                ForEach(Analytics.groupedByDay(filtered), id: \.day) { group in
+                    Section {
+                        ForEach(group.items) { t in
+                            transactionRowView(for: t)
+                        }
+                    } header: {
+                        Text(group.title)
+                            .font(DS.Typography.caption)
+                            .foregroundStyle(DS.Colors.subtext)
                     }
-                } header: {
-                    Text(group.title)
-                        .font(DS.Typography.caption)
-                        .foregroundStyle(DS.Colors.subtext)
+                }
+            } else {
+                // For amount/category sorting, show flat list
+                ForEach(filtered) { t in
+                    transactionRowView(for: t)
                 }
             }
         }
@@ -1926,12 +2038,11 @@ private struct TransactionsView: View {
                 filtersActive: activeFilterCount > 0,
                 showImport: $showImport,
                 showFilters: $showFilters,
-                showAdd: $showAdd
-                // showRecurring: $showRecurring,  // ← COMMENTED OUT - باگ داره
-                , disabled: store.budgetTotal <= 0,
+                showAdd: $showAdd,
+                showSortMenu: $showSortMenu,
+                disabled: store.budgetTotal <= 0,
                 uiAnim: uiAnim
             )
-            .padding(.trailing, 6)
         }
     }
 
@@ -1951,6 +2062,7 @@ private struct TransactionsTrailingButtons: View {
     @Binding var showImport: Bool
     @Binding var showFilters: Bool
     @Binding var showAdd: Bool
+    @Binding var showSortMenu: Bool
     // @Binding var showRecurring: Bool  // ← COMMENTED OUT - باگ داره
     let disabled: Bool
     let uiAnim: Animation
@@ -1968,6 +2080,16 @@ private struct TransactionsTrailingButtons: View {
             //         .frame(width: 36, height: 36)
             // }
             //.buttonStyle(.plain)
+            
+            // Sort button
+            Button { showSortMenu = true } label: {
+                Image(systemName: "arrow.up.arrow.down.circle")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(DS.Colors.text)
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
             
             Button { showImport = true } label: {
                 Image(systemName: "square.and.arrow.down")
@@ -2016,6 +2138,61 @@ private struct ImportTransactionsSheet: View {
 
     var body: some View {
         ImportTransactionsScreen(store: $store)
+    }
+}
+
+
+// MARK: - Sort Menu Sheet
+private struct SortMenuSheet: View {
+    @Binding var selectedSort: TransactionsView.SortOption
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(TransactionsView.SortOption.allCases, id: \.self) { option in
+                    Button {
+                        selectedSort = option
+                        Haptics.selection()
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Image(systemName: option.icon)
+                                .font(.system(size: 18))
+                                .foregroundStyle(DS.Colors.accent)
+                                .frame(width: 32)
+                            
+                            Text(option.rawValue)
+                                .font(DS.Typography.body)
+                                .foregroundStyle(DS.Colors.text)
+                            
+                            Spacer()
+                            
+                            if selectedSort == option {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(DS.Colors.positive)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .listRowBackground(DS.Colors.surface)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(DS.Colors.bg)
+            .navigationTitle("Sort By")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundStyle(DS.Colors.accent)
+                }
+            }
+        }
     }
 }
 
@@ -2258,7 +2435,7 @@ private struct TransactionsFilterSheet: View {
                                         Text("Min")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
-                                        TextField("0.00", text: $minAmountText)
+                                        TextField(DS.Format.currencySymbol() + " 0", text: $minAmountText)
                                             .keyboardType(.decimalPad)
                                             .font(DS.Typography.number)
                                             .padding(10)
@@ -2273,7 +2450,7 @@ private struct TransactionsFilterSheet: View {
                                         Text("Max")
                                             .font(DS.Typography.caption)
                                             .foregroundStyle(DS.Colors.subtext)
-                                        TextField("0.00", text: $maxAmountText)
+                                        TextField(DS.Format.currencySymbol() + " 1000", text: $maxAmountText)
                                             .keyboardType(.decimalPad)
                                             .font(DS.Typography.number)
                                             .padding(10)
@@ -2345,12 +2522,15 @@ private struct TransactionsFilterSheet: View {
 
 private struct BudgetView: View {
     @Binding var store: Store
+    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
+    @State private var showPaywall = false
 
     @State private var editingTotal = ""
     @State private var editingCategoryBudgets: [Category: String] = [:]
     @State private var showAddCategory = false
     @State private var newCategoryName = ""
     @FocusState private var focus: Bool
+    @FocusState private var categoryFocus: Category?
 
     var body: some View {
         NavigationStack {
@@ -2367,18 +2547,11 @@ private struct BudgetView: View {
                                 .foregroundStyle(DS.Colors.subtext)
 
                             HStack(spacing: 10) {
-                                TextField("e.g. 3000.00", text: $editingTotal)
-                                    .keyboardType(.decimalPad)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .focused($focus)
-                                    .font(DS.Typography.number)
-                                    .padding(11)
-                                    .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(DS.Colors.grid, lineWidth: 1)
-                                    )
+                                CurrencyTextField(
+                                    text: $editingTotal,
+                                    placeholder: DS.Format.amountPlaceholder(),
+                                    isFocused: $focus
+                                )
 
                                 Button(store.budgetTotal <= 0 ? "Start" : "Update") {
                         
@@ -2494,7 +2667,7 @@ private struct BudgetView: View {
                                             }
                                             Spacer()
 
-                                            TextField("0.00", text: Binding(
+                                            TextField(DS.Format.currencySymbol() + " 0", text: Binding(
                                                 get: { editingCategoryBudgets[c] ?? "" },
                                                 set: { newVal in
                                                     editingCategoryBudgets[c] = newVal
@@ -2594,6 +2767,7 @@ private struct BudgetView: View {
                 .padding(.bottom, 24)
             }
             .navigationTitle("Budget")
+            .keyboardManagement()  // Global keyboard handling
             .alert("New Category", isPresented: $showAddCategory) {
                 TextField("Category name", text: $newCategoryName)
                 Button("Cancel", role: .cancel) {
@@ -2617,6 +2791,9 @@ private struct BudgetView: View {
                 }
                 editingCategoryBudgets = map
             }
+            .sheet(isPresented: $showPaywall) {
+                SimplePaywallView()
+            }
         }
     }
 }
@@ -2628,6 +2805,8 @@ private struct InsightsView: View {
     let goToBudget: () -> Void
     @State private var showAI: Bool = false
     @State private var showAdvancedCharts: Bool = false
+    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
+    @State private var showPaywall = false
     
     @AppStorage("notifications.enabled") private var notificationsEnabled: Bool = false
     @State private var notifDetail: String? = nil
@@ -2776,6 +2955,11 @@ private struct InsightsView: View {
 
                                 HStack(spacing: 10) {
                                     Button {
+                                        // SUBSCRIPTION DISABLED
+                                        // guard subscriptionManager.isPro else {
+                                        //     showPaywall = true
+                                        //     return
+                                        // }
                                         Haptics.medium()
                                         exportMonth(format: .excel)
                                     } label: {
@@ -2787,6 +2971,11 @@ private struct InsightsView: View {
                                     .buttonStyle(DS.PrimaryButton())
 
                                     Button {
+                                        // SUBSCRIPTION DISABLED
+                                        // guard subscriptionManager.isPro else {
+                                        //     showPaywall = true
+                                        //     return
+                                        // }
                                         Haptics.medium()
                                         exportMonth(format: .csv)
                                     } label: {
@@ -2799,6 +2988,11 @@ private struct InsightsView: View {
                                 }
                                 
                                 Button {
+                                    // SUBSCRIPTION DISABLED
+                                    // guard subscriptionManager.isPro else {
+                                    //     showPaywall = true
+                                    //     return
+                                    // }
                                     Haptics.medium()
                                     exportMonth(format: .pdf)
                                 } label: {
@@ -2815,6 +3009,64 @@ private struct InsightsView: View {
                                     .foregroundStyle(DS.Colors.subtext)
                             }
                         }
+                        // SUBSCRIPTION DISABLED - Export overlay
+                        /*
+                        .overlay(alignment: .center) {
+                            if !subscriptionManager.isPro {
+                                ZStack {
+                                    // Blur background
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(.ultraThinMaterial)
+                                    
+                                    // Lock content
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "lock.fill")
+                                            .font(.system(size: 40))
+                                            .foregroundStyle(
+                                                LinearGradient(
+                                                    colors: [.yellow, .orange],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+                                        
+                                        Text("Export Reports")
+                                            .font(.system(size: 18, weight: .bold))
+                                            .foregroundColor(DS.Colors.text)
+                                        
+                                        Text("Upgrade to Pro to unlock")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(DS.Colors.subtext)
+                                        
+                                        Button {
+                                            showPaywall = true
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Image(systemName: "crown.fill")
+                                                Text("Upgrade Now")
+                                                    .fontWeight(.semibold)
+                                            }
+                                            .font(.system(size: 15))
+                                            .foregroundColor(.black)
+                                            .padding(.horizontal, 24)
+                                            .padding(.vertical, 12)
+                                            .background(
+                                                LinearGradient(
+                                                    colors: [.yellow, .orange],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                )
+                                            )
+                                            .cornerRadius(12)
+                                        }
+                                    }
+                                    .padding(.vertical, 20)
+                                }
+                            }
+                        }
+                        .zIndex(1)
+                        .padding(.bottom, subscriptionManager.isPro ? 0 : 30)
+                        */
                         
                         
                         // Advanced Charts
@@ -2835,6 +3087,11 @@ private struct InsightsView: View {
                                     .foregroundStyle(DS.Colors.subtext)
                                 
                                 Button {
+                                    // SUBSCRIPTION DISABLED
+                                    // guard subscriptionManager.isPro else {
+                                    //     showPaywall = true
+                                    //     return
+                                    // }
                                     Haptics.light()
                                     showAdvancedCharts = true
                                 } label: {
@@ -2847,6 +3104,64 @@ private struct InsightsView: View {
                                 .buttonStyle(DS.PrimaryButton())
                             }
                         }
+                        // SUBSCRIPTION DISABLED - Charts overlay
+                        /*
+                        .overlay(alignment: .center) {
+                            if !subscriptionManager.isPro {
+                                ZStack {
+                                    // Blur background
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(.ultraThinMaterial)
+                                    
+                                    // Lock content
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "lock.fill")
+                                            .font(.system(size: 40))
+                                            .foregroundStyle(
+                                                LinearGradient(
+                                                    colors: [.yellow, .orange],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+                                        
+                                        Text("Advanced Charts")
+                                            .font(.system(size: 18, weight: .bold))
+                                            .foregroundColor(DS.Colors.text)
+                                        
+                                        Text("Upgrade to Pro to unlock")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(DS.Colors.subtext)
+                                        
+                                        Button {
+                                            showPaywall = true
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Image(systemName: "crown.fill")
+                                                Text("Upgrade Now")
+                                                    .fontWeight(.semibold)
+                                            }
+                                            .font(.system(size: 15))
+                                            .foregroundColor(.black)
+                                            .padding(.horizontal, 24)
+                                            .padding(.vertical, 12)
+                                            .background(
+                                                LinearGradient(
+                                                    colors: [.yellow, .orange],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                )
+                                            )
+                                            .cornerRadius(12)
+                                        }
+                                    }
+                                    .padding(.vertical, 20)
+                                }
+                            }
+                        }
+                        .zIndex(1)
+                        .padding(.bottom, subscriptionManager.isPro ? 0 : 30)
+                        */
                         
                         
                         // Professional Analysis Website
@@ -3019,6 +3334,9 @@ private struct InsightsView: View {
             }
             .sheet(isPresented: $showAdvancedCharts) {
                 AdvancedChartsView(store: $store)
+            }
+            .sheet(isPresented: $showPaywall) {
+                SimplePaywallView()
             }
         }
     }
@@ -3355,12 +3673,99 @@ private struct SettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var firestoreManager: FirestoreManager
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared  // ← این خط عوض شد
+    @State private var showPaywall = false
 
     
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    // SUBSCRIPTION DISABLED - Pro Upgrade Card
+                    /*
+                    // Pro Upgrade Card (if not pro)
+                    if !subscriptionManager.isPro {
+                        Button {
+                            showPaywall = true
+                        } label: {
+                            DS.Card {
+                                HStack(spacing: 16) {
+                                    Image(systemName: "crown.fill")
+                                        .font(.system(size: 32))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: [.yellow, .orange],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Upgrade to Pro")
+                                            .font(.system(size: 17, weight: .bold))
+                                            .foregroundStyle(DS.Colors.text)
+                                        
+                                        Text("Unlimited transactions, cloud sync & more")
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(DS.Colors.subtext)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "arrow.right")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(DS.Colors.text)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [.yellow.opacity(0.5), .orange.opacity(0.5)],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        ),
+                                        lineWidth: 1.5
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    // Pro Status Card (if pro)
+                    if subscriptionManager.isPro {
+                        DS.Card {
+                            HStack(spacing: 16) {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: [.green, .mint],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Balance Pro Active")
+                                        .font(.system(size: 17, weight: .bold))
+                                        .foregroundStyle(DS.Colors.text)
+                                    
+                                    if let expiration = subscriptionManager.expirationDate {
+                                        Text("Renews on \(expiration, style: .date)")
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(DS.Colors.subtext)
+                                    }
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    */
+                    
                     // Profile Card
                     NavigationLink {
                         ProfileView(store: $store)
@@ -3714,7 +4119,10 @@ private struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .id(refreshID)
-            
+            .sheet(isPresented: $showPaywall) {
+                SimplePaywallView()
+                    .environmentObject(authManager)
+            }
         }
     }
     
@@ -5551,6 +5959,8 @@ private struct TransactionFormCard: View {
 
     let categories: [Category]
     let onAddCategory: () -> Void
+    
+    @FocusState private var amountFocused: Bool
 
     var body: some View {
         DS.Card {
@@ -5611,15 +6021,11 @@ private struct TransactionFormCard: View {
                     .font(DS.Typography.caption)
                     .foregroundStyle(DS.Colors.subtext)
 
-                TextField("e.g. 250.00", text: $amountText)
-                    .keyboardType(.decimalPad)
-                    .font(DS.Typography.number)
-                    .padding(12)
-                    .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(DS.Colors.grid, lineWidth: 1)
-                    )
+                CurrencyTextField(
+                    text: $amountText,
+                    placeholder: DS.Format.amountPlaceholder(),
+                    isFocused: $amountFocused
+                )
 
                 Divider().overlay(DS.Colors.grid)
 
@@ -5723,6 +6129,9 @@ private struct TransactionFormCard: View {
 struct AddTransactionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var store: Store
+    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
+    @State private var showPaywall = false
+    @State private var showLimitAlert = false
     
     @State private var amountText = ""
     @State private var note = ""
@@ -5948,6 +6357,19 @@ struct AddTransactionSheet: View {
                     Button {
                         let amount = DS.Format.cents(from: amountText)
                         guard amount > 0 else { return }
+                        
+                        // SUBSCRIPTION DISABLED - Transaction limit check
+                        /*
+                        // چک کردن محدودیت تعداد تراکنش‌ها
+                        let currentCount = store.transactions.count
+                        let freeLimit = 50
+                        
+                        if !subscriptionManager.isPro && currentCount >= freeLimit {
+                            showLimitAlert = true
+                            return
+                        }
+                        */
+                        
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
                             store.add(Transaction(
                                 amount: amount,
@@ -5980,6 +6402,7 @@ struct AddTransactionSheet: View {
                 .padding(.bottom, 24)
             }
         }
+        .keyboardManagement()  // Global keyboard handling
         .confirmationDialog("Add attachment", isPresented: $showAttachmentOptions) {
             Button("Attach Photo") {
                 showImagePicker = true
@@ -6009,6 +6432,17 @@ struct AddTransactionSheet: View {
         }
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPicker(fileData: $attachmentData, attachmentType: $attachmentType)
+        }
+        .alert("Transaction Limit Reached", isPresented: $showLimitAlert) {
+            Button("Upgrade to Pro") {
+                showPaywall = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Free users can create up to 50 transactions. Upgrade to Pro for unlimited transactions!")
+        }
+        .sheet(isPresented: $showPaywall) {
+            SimplePaywallView()
         }
     }
 }
@@ -6534,6 +6968,28 @@ enum DS {
             fmt.locale = .current
             fmt.unitsStyle = .abbreviated
             return fmt.localizedString(for: date, relativeTo: Date())
+        }
+        
+        /// Get current currency symbol
+        static func currencySymbol() -> String {
+            let currencyCode = UserDefaults.standard.string(forKey: "app.currency") ?? "EUR"
+            switch currencyCode {
+            case "EUR": return "€"
+            case "USD": return "$"
+            case "GBP": return "£"
+            case "JPY": return "¥"
+            case "CAD": return "C$"
+            case "CHF": return "Fr"
+            case "AUD": return "A$"
+            case "INR": return "₹"
+            default: return currencyCode
+            }
+        }
+        
+        /// Get placeholder for amount input
+        static func amountPlaceholder() -> String {
+            let symbol = currencySymbol()
+            return "\(symbol) 250"
         }
     }
 }
@@ -7618,7 +8074,8 @@ enum Analytics {
 
         return groups
             .map { (day, items) in
-                DayGroup(day: day, title: fmt.string(from: day), items: items.sorted { $0.date > $1.date })
+                // Don't sort items here - keep original order from input
+                DayGroup(day: day, title: fmt.string(from: day), items: items)
             }
             .sorted { $0.day > $1.day }
     }
@@ -8626,6 +9083,8 @@ private struct ImportTransactionsScreen: View {
     @Binding var store: Store
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var firestoreManager: FirestoreManager
+    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
+    @State private var showPaywall = false
 
     @State private var pickedURL: URL? = nil
     @State private var parsed: ParsedCSV? = nil
@@ -8667,6 +9126,11 @@ private struct ImportTransactionsScreen: View {
                                 .foregroundStyle(DS.Colors.subtext)
 
                             Button {
+                                // SUBSCRIPTION DISABLED
+                                // guard subscriptionManager.isPro else {
+                                //     showPaywall = true
+                                //     return
+                                // }
                                 isPicking = true
                             } label: {
                                 HStack {
@@ -8682,6 +9146,63 @@ private struct ImportTransactionsScreen: View {
                                 .foregroundStyle(DS.Colors.subtext)
                         }
                     }
+                    // SUBSCRIPTION DISABLED - CSV Import overlay
+                    /*
+                    .overlay(alignment: .center) {
+                        if !subscriptionManager.isPro {
+                            ZStack {
+                                // Blur background
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(.ultraThinMaterial)
+                                
+                                // Lock content
+                                VStack(spacing: 12) {
+                                    Image(systemName: "lock.fill")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: [.yellow, .orange],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                    
+                                    Text("Import Transactions")
+                                        .font(.system(size: 18, weight: .bold))
+                                        .foregroundColor(DS.Colors.text)
+                                    
+                                    Text("Upgrade to Pro to unlock")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(DS.Colors.subtext)
+                                    
+                                    Button {
+                                        showPaywall = true
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: "crown.fill")
+                                            Text("Upgrade Now")
+                                                .fontWeight(.semibold)
+                                        }
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.black)
+                                        .padding(.horizontal, 24)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            LinearGradient(
+                                                colors: [.yellow, .orange],
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            )
+                                        )
+                                        .cornerRadius(12)
+                                    }
+                                }
+                                .padding(.vertical, 20)
+                            }
+                        }
+                    }
+                    .zIndex(1)
+                    */
 
                     if let parsed {
                         DS.Card {
@@ -8759,6 +9280,7 @@ private struct ImportTransactionsScreen: View {
         }
         .navigationTitle("Import")
         .navigationBarTitleDisplayMode(.inline)
+        .keyboardManagement()  // Global keyboard handling
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") { dismiss() }
@@ -8794,6 +9316,9 @@ private struct ImportTransactionsScreen: View {
             }
         } message: {
             Text(String(format: "You have %d existing transactions", store.transactions.count))
+        }
+        .sheet(isPresented: $showPaywall) {
+            SimplePaywallView()
         }
     }
 
