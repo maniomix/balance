@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 // MARK: - Analytics Manager
 @MainActor
@@ -330,8 +331,8 @@ extension AnalyticsManager {
         static let budget = "budget"
         static let insights = "insights"
         static let settings = "settings"
-        static let export = "export"
-        static let import = "import"
+        static let exportData = "export"
+        static let importData = "import"
     }
 }
 

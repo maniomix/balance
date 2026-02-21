@@ -1,144 +1,102 @@
 import SwiftUI
-import FirebaseAuth
+import Supabase
 
 struct SyncStatusView: View {
-    @ObservedObject var firestoreManager: FirestoreManager
-    @Binding var store: Store
-    @State private var isManualSyncing = false
-    @State private var syncButtonPressed = false
-    @State private var showErrorAlert = false
+    @EnvironmentObject private var supabase: SupabaseManager
+    @EnvironmentObject private var authManager: AuthManager
     
     var body: some View {
         HStack(spacing: 8) {
-            // Status Indicator
-            statusIndicator
-                .frame(minWidth: 100) // Minimum width to prevent jumping
-                .frame(height: 32)
-                .padding(.horizontal, 12)
-                .background(
-                    Capsule()
-                        .fill(Color.white.opacity(0.12))
-                )
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: firestoreManager.isSyncing)
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isManualSyncing)
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: firestoreManager.lastSyncDate)
-            
-            // Manual Sync Button
-            if !firestoreManager.isSyncing && !isManualSyncing {
-                syncButton
-                    .transition(.scale.combined(with: .opacity))
-            }
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: firestoreManager.isSyncing)
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: isManualSyncing)
-    }
-    
-    @ViewBuilder
-    private var statusIndicator: some View {
-        HStack(spacing: 8) {
-            if firestoreManager.isSyncing || isManualSyncing {
+            // Sync Icon
+            if supabase.isSyncing {
                 ProgressView()
                     .scaleEffect(0.7)
-                    .tint(.white)
-                Text("Syncing...")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-            } else if let error = firestoreManager.syncError {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .tint(Color(uiColor: .secondaryLabel))
+            } else {
+                Image(systemName: syncIcon)
                     .font(.system(size: 14))
-                    .transition(.scale.combined(with: .opacity))
-                Button {
-                    showErrorAlert = true
-                } label: {
-                    Text("Sync failed")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-                .buttonStyle(.plain)
-                .transition(.opacity)
-                .alert("Sync Error", isPresented: $showErrorAlert) {
-                    Button("OK") {
-                        showErrorAlert = false
-                    }
-                } message: {
-                    Text(error)
-                }
-            } else if let _ = firestoreManager.lastSyncDate {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.system(size: 14))
-                    .transition(.scale.combined(with: .opacity))
-                Text(timeAgo(firestoreManager.lastSyncDate!))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .transition(.opacity)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-    
-    @ViewBuilder
-    private var syncButton: some View {
-        Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                syncButtonPressed = true
+                    .foregroundStyle(syncColor)
             }
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    syncButtonPressed = false
+            // Status Text
+            VStack(alignment: .leading, spacing: 2) {
+                Text(statusText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color(uiColor: .label))
+                
+                if let lastSync = supabase.lastSyncTime {
+                    Text(timeAgo(from: lastSync))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
                 }
             }
             
-            manualSync()
-        } label: {
-            Text("Sync")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-        }
-        .buttonStyle(.plain)
-        .frame(width: 55, height: 32) // Fixed size
-        .background(
-            Capsule()
-                .fill(Color.white.opacity(syncButtonPressed ? 0.25 : 0.12))
-        )
-        .scaleEffect(syncButtonPressed ? 0.95 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: syncButtonPressed)
-    }
-    
-    private func manualSync() {
-        guard !isManualSyncing else { return }
-        guard let userId = Auth.auth().currentUser?.uid else { return }
-        
-        isManualSyncing = true
-        Haptics.light()
-        
-        Task {
-            do {
-                let syncedStore = try await firestoreManager.syncStore(store, userId: userId)
-                await MainActor.run {
-                    store = syncedStore
-                    store.save(userId: userId)
+            Spacer()
+            
+            // User Info
+            if let user = authManager.currentUser {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
                     
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        isManualSyncing = false
-                    }
-                    Haptics.success()
-                }
-            } catch {
-                print("Manual sync error: \(error)")
-                await MainActor.run {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        isManualSyncing = false
-                    }
-                    Haptics.medium()
+                    Text(userDisplayName(user))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
+                        .lineLimit(1)
                 }
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .cornerRadius(12)
     }
     
-    private func timeAgo(_ date: Date) -> String {
+    // MARK: - Computed Properties
+    
+    private var statusText: String {
+        if supabase.isSyncing {
+            return "Syncing..."
+        } else if let error = supabase.syncError {
+            return "Sync failed"
+        } else if supabase.lastSyncTime != nil {
+            return "Synced"
+        } else {
+            return "Not synced"
+        }
+    }
+    
+    private var syncIcon: String {
+        if let error = supabase.syncError {
+            return "exclamationmark.triangle.fill"
+        } else if supabase.lastSyncTime != nil {
+            return "checkmark.icloud.fill"
+        } else {
+            return "icloud.slash.fill"
+        }
+    }
+    
+    private var syncColor: Color {
+        if let error = supabase.syncError {
+            return .red
+        } else if supabase.lastSyncTime != nil {
+            return .green
+        } else {
+            return Color(uiColor: .secondaryLabel)
+        }
+    }
+    
+    // MARK: - Helper Functions
+    
+    private func userDisplayName(_ user: User) -> String {
+        if let email = user.email {
+            return email.components(separatedBy: "@").first ?? email
+        }
+        return "User"
+    }
+    
+    private func timeAgo(from date: Date) -> String {
         let seconds = Int(Date().timeIntervalSince(date))
         
         if seconds < 60 {
@@ -154,4 +112,11 @@ struct SyncStatusView: View {
             return "\(days)d ago"
         }
     }
+}
+
+#Preview {
+    SyncStatusView()
+        .environmentObject(SupabaseManager.shared)
+        .environmentObject(AuthManager.shared)
+        .padding()
 }

@@ -6,10 +6,6 @@ import UserNotifications
 import ZIPFoundation
 import UniformTypeIdentifiers
 import CryptoKit
-import FirebaseAuth
-
-
-
 
 // MARK: - Root
 
@@ -21,8 +17,8 @@ struct ContentView: View {
     @AppStorage("app.theme") private var selectedTheme: String = "dark"
     @State private var uiRefreshID = UUID()
     @EnvironmentObject private var authManager: AuthManager
-    @StateObject private var firestoreManager = FirestoreManager()
-
+    @EnvironmentObject private var supabaseManager: SupabaseManager
+    @StateObject private var onboardingManager = OnboardingManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
     // Debounced smart-rule evaluation to prevent repeated scheduling/firing
@@ -34,7 +30,101 @@ struct ContentView: View {
 
     private let notifEvalDebounceSeconds: TimeInterval = 0.9
     
+    // Timer for periodic sync (every 2 minutes)
+    @State private var syncTimer: Timer?
+    
     // MARK: - Helper Functions
+    
+    /// Load user data from local and sync with cloud
+    private func loadUserData() {
+        guard let userId = authManager.currentUser?.uid else {
+            print("❌ loadUserData: No user ID found!")
+            return
+        }
+        
+        print("==================================================")
+        print("📥 Loading user data...")
+        print("👤 User ID: \(userId)")
+        print("==================================================")
+        
+        // 1. Load from local storage first (fast)
+        store = Store.load(userId: userId)
+        print("✅ Local data loaded:")
+        print("   - Transactions: \(store.transactions.count)")
+        print("   - Budgets: \(store.budgetsByMonth.count)")
+        print("   - Category Budgets: \(store.categoryBudgetsByMonth.count)")
+        
+        // 2. Sync from cloud (in background)
+        Task { try? await Task.sleep(nanoseconds: 100_000_000);
+            do {
+                print("🔄 Starting cloud sync...")
+                print("   - Querying Supabase with user_id: \(userId)")
+                
+                let cloudStore = try await supabaseManager.syncStore(store)
+                
+                print("✅ Cloud sync SUCCESS!")
+                print("   - Transactions received: \(cloudStore.transactions.count)")
+                print("   - Budgets received: \(cloudStore.budgetsByMonth.count)")
+                print("   - Category Budgets received: \(cloudStore.categoryBudgetsByMonth.count)")
+                
+                if cloudStore.transactions.isEmpty {
+                    print("⚠️ WARNING: No transactions received from Supabase!")
+                    print("   Possible reasons:")
+                    print("   1. user_id mismatch")
+                    print("   2. RLS policy blocking access")
+                    print("   3. No data in database")
+                }
+                
+                await MainActor.run {
+                    store = cloudStore
+                    // Save synced data locally
+                    store.save(userId: userId)
+                    print("💾 Synced data saved locally")
+                    print("==================================================")
+                }
+                
+            } catch {
+                print("❌ Cloud sync FAILED!")
+                print("   - Error: \(error)")
+                print("   - Error description: \(error.localizedDescription)")
+                print("==================================================")
+            }
+        }
+        
+        // 3. Start periodic sync timer (every 2 minutes)
+        startPeriodicSync()
+    }
+    
+    /// Start timer for periodic cloud sync
+    private func startPeriodicSync() {
+        // Cancel existing timer
+        syncTimer?.invalidate()
+        
+        // Create new timer (every 2 minutes)
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { _ in
+            guard let userId = authManager.currentUser?.uid else { return }
+            
+            Task { try? await Task.sleep(nanoseconds: 100_000_000);
+                do {
+                    print("⏰ Periodic sync...")
+                    let cloudStore = try await supabaseManager.syncStore(store)
+                    await MainActor.run {
+                        store = cloudStore
+                        store.save(userId: userId)
+                    }
+                    print("✅ Periodic sync complete")
+                } catch {
+                    print("❌ Periodic sync failed: \(error)")
+                }
+            }
+        }
+    }
+    
+    /// Stop periodic sync timer
+    private func stopPeriodicSync() {
+        syncTimer?.invalidate()
+        syncTimer = nil
+    }
     
     /// Save store to local only
     private func saveStore() {
@@ -53,12 +143,26 @@ struct ContentView: View {
                                 showLaunchScreen = false
                             }
                             .transition(.opacity)
+                        } else if !onboardingManager.hasCompletedOnboarding && !onboardingManager.showOnboarding {
+                            // ✅ Welcome screen
+                            WelcomeView(onboardingManager: onboardingManager)
+                                .transition(.opacity)
+                        } else if onboardingManager.showOnboarding {
+                            // ✅ Tutorial کارتی
+                            SimpleTutorialView(onboardingManager: onboardingManager)
+                                .transition(.opacity)
                         } else {
                             mainAppView
                                 .transition(.opacity)
                         }
                     }
                     .animation(.easeInOut(duration: 0.4), value: showLaunchScreen)
+                    .animation(.easeInOut(duration: 0.4), value: onboardingManager.hasCompletedOnboarding)
+                    .animation(.easeInOut(duration: 0.4), value: onboardingManager.showOnboarding)
+                    .onAppear {
+                        // Load data when app appears (app startup)
+                        loadUserData()
+                    }
                 } else {
                     // User not logged in - show authentication
                     AuthenticationView()
@@ -67,24 +171,17 @@ struct ContentView: View {
             }
             .onChange(of: authManager.currentUser?.uid) { oldValue, newValue in
                 // When user changes (login/logout/switch), load their data
-                if let userId = newValue {
+                if newValue != nil {
                     // User logged in - load their data
-                    store = Store.load(userId: userId)
-                    
-                    // Sync from cloud
-                    Task {
-                        do {
-                            if let cloudStore = try await firestoreManager.loadStore(userId: userId) {
-                                store = cloudStore
-                            }
-                        } catch {
-                            print("Error loading from cloud: \(error)")
-                        }
-                    }
+                    loadUserData()
                 } else {
-                    // User logged out - clear data
+                    // User logged out - clear data and stop sync
+                    stopPeriodicSync()
                     store = Store()
                 }
+            }
+            .overlay {
+                // ✅ Interactive Tutorial Overlay
             }
         }
         
@@ -116,7 +213,7 @@ struct ContentView: View {
                     .tabItem { Label("Settings", systemImage: "gearshape") }
                     .tag(Tab.settings)
             }
-            .environmentObject(firestoreManager)
+            .environmentObject(supabaseManager)
             .onChange(of: selectedTab) { _, _ in
                 Haptics.selection()
             }
@@ -130,7 +227,7 @@ struct ContentView: View {
                 // (فقط یکبار در هر اجرای برنامه سینک کن تا نوتیف تکراری ساخته نشه)
                 if notificationsEnabled && !didSyncNotifications {
                     didSyncNotifications = true
-                    Task {
+                    Task { try? await Task.sleep(nanoseconds: 100_000_000);
                         await Notifications.syncAll(store: store)
                     }
                 }
@@ -142,7 +239,7 @@ struct ContentView: View {
 
                 notifEvalWorkItem?.cancel()
                 let item = DispatchWorkItem {
-                    Task {
+                    Task { try? await Task.sleep(nanoseconds: 100_000_000);
                         await Notifications.evaluateSmartRules(store: newStore)
                     }
                 }
@@ -158,7 +255,7 @@ struct ContentView: View {
             // Auto-sync to Firestore whenever store changes
             .onChange(of: store) { _, newStore in
                 autoSyncTask?.cancel()
-                autoSyncTask = Task {
+                autoSyncTask = Task { try? await Task.sleep(nanoseconds: 100_000_000);
                     // Debounce: wait 2 seconds before syncing
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     
@@ -171,10 +268,10 @@ struct ContentView: View {
                     // Save locally first
                     newStore.save(userId: userId)
                     
-                    // Then sync to Firestore
+                    // Then sync to Supabase
                     do {
-                        try await firestoreManager.saveStore(newStore, userId: userId)
-                        print("✅ Auto-synced to Firestore")
+                        try await supabaseManager.saveStore(newStore)
+                        print("✅ Auto-synced to Supabase")
                     } catch let error as NSError {
                         print("❌ Auto-sync failed:")
                         print("   Error code: \(error.code)")
@@ -193,23 +290,21 @@ struct ContentView: View {
                 if authManager.isAuthenticated, let userId = authManager.currentUser?.uid {
                     // Sync when user logs in
                     do {
-                        let syncedStore = try await firestoreManager.syncStore(store, userId: userId)
+                        let syncedStore = try await supabaseManager.syncStore(store)
                         store = syncedStore
                         saveStore() // Save with userId
                         
                         // Start real-time listener for auto-sync from other devices
-                        firestoreManager.startRealtimeSync(userId: userId) { remoteStore in
-                            // Update local store when remote changes
-                            self.store = remoteStore
-                            self.store.save(userId: userId)
-                            print("📱 Store updated from another device")
+                        supabaseManager.startRealtimeSync(userId: userId) {
+                            // Real-time sync callback
+                            print("📱 Real-time sync triggered")
                         }
                     } catch {
                         print("Sync error: \(error)")
                     }
                 } else {
                     // User logged out - stop listener and reset store
-                    firestoreManager.stopRealtimeSync()
+                    supabaseManager.stopRealtimeSync()
                     store = Store()
                     showLaunchScreen = true
                 }
@@ -672,9 +767,9 @@ private struct DashboardView: View {
     let goToBudget: () -> Void
     @State private var showAdd = false
     @State private var trendSelectedDay: Int? = nil
-    @EnvironmentObject private var firestoreManager: FirestoreManager
+
     @EnvironmentObject private var authManager: AuthManager
-    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
+    @EnvironmentObject private var supabaseManager: SupabaseManager
 
     private var monthTitle: String {
         let fmt = DateFormatter()
@@ -706,6 +801,7 @@ private struct DashboardView: View {
     @State private var showTrashAlert = false
     @State private var trashAlertText = ""
     @State private var showPaywall = false
+    @State private var isRefreshing = false
 
     var body: some View {
         NavigationStack {
@@ -756,7 +852,7 @@ private struct DashboardView: View {
                 
                 // 🔄 Sync Status (وسط)
                 ToolbarItem(placement: .principal) {
-                    SyncStatusView(firestoreManager: firestoreManager, store: $store)
+                    SyncStatusView()
                 }
 
                 // ➕ دکمه اضافه کردن (سمت راست – همونی که داشتی)
@@ -781,8 +877,7 @@ private struct DashboardView: View {
         .onAppear {
             // Load subscription status when dashboard appears
             if let userId = authManager.currentUser?.uid {
-                Task {
-                    await SimpleSubscriptionManager.shared.loadSubscriptionStatus(userId: userId)
+                Task { try? await Task.sleep(nanoseconds: 100_000_000);
                 }
             }
         }
@@ -795,8 +890,8 @@ private struct DashboardView: View {
                 // Save
                 if let userId = authManager.currentUser?.uid {
                     store.save(userId: userId)
-                    Task {
-                        try? await firestoreManager.saveStore(store, userId: userId)
+                    Task { try? await Task.sleep(nanoseconds: 100_000_000);
+                        try? await supabaseManager.saveStore(store)
                     }
                 }
                 Haptics.success()
@@ -804,7 +899,7 @@ private struct DashboardView: View {
                 showTrashAlert = true
             }
 
-            Button("common.cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will delete all transactions for this month. This action cannot be undone.")
         }
@@ -819,7 +914,6 @@ private struct DashboardView: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showPaywall) {
-            SimplePaywallView()
         }
     }
 
@@ -891,7 +985,6 @@ private struct DashboardView: View {
             // نمایش تعداد تراکنش‌های باقیمانده برای Free users
             // MARK: - SUBSCRIPTION DISABLED - Uncomment to enable
             /*
-            if !subscriptionManager.isPro {
                 // تعداد کل تراکنش‌ها (همه ماه‌ها)
                 let currentCount = store.transactions.count
                 let freeLimit = 50
@@ -1701,7 +1794,7 @@ private struct TransactionsView: View {
             }
             scheduleUndoCommit()
         }
-        Button("common.cancel", role: .cancel) {
+        Button("Cancel", role: .cancel) {
             showBulkDeletePopover = false
         }
     }
@@ -1756,10 +1849,9 @@ private struct TransactionsView: View {
                 searchScope = .thisMonth
             }
         }
-        .confirmationDialog(
-            "transactions.delete_confirm",
-            isPresented: isRowDeleteDialogPresented,
-            titleVisibility: .visible
+        .alert(
+            "Delete Transaction?",
+            isPresented: isRowDeleteDialogPresented
         ) {
             deleteDialogButtons
         } message: {
@@ -1936,7 +2028,7 @@ private struct TransactionsView: View {
             }
             scheduleUndoCommit()
         }
-        Button("common.cancel", role: .cancel) {
+        Button("Cancel", role: .cancel) {
             pendingDeleteID = nil
         }
     }
@@ -2450,13 +2542,13 @@ private struct TransactionsFilterSheet: View {
 
 private struct BudgetView: View {
     @Binding var store: Store
-    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
     @State private var showPaywall = false
 
     @State private var editingTotal = ""
     @State private var editingCategoryBudgets: [Category: String] = [:]
     @State private var showAddCategory = false
     @State private var newCategoryName = ""
+    @State private var editingCustomCategory: CustomCategoryModel?
     @FocusState private var focus: Bool
 
     var body: some View {
@@ -2588,11 +2680,26 @@ private struct BudgetView: View {
                                         HStack(spacing: 10) {
                                             HStack(spacing: 8) {
                                                 Circle()
-                                                    .fill(c.tint.opacity(0.18))
+                                                    .fill({
+                                                        if case .custom(let name) = c {
+                                                            return store.customCategoryColor(for: name).opacity(0.18)
+                                                        }
+                                                        return c.tint.opacity(0.18)
+                                                    }())
                                                     .frame(width: 26, height: 26)
                                                     .overlay(
-                                                        Image(systemName: c.icon)
-                                                            .foregroundStyle(c.tint)
+                                                        Image(systemName: {
+                                                            if case .custom(let name) = c {
+                                                                return store.customCategoryIcon(for: name)
+                                                            }
+                                                            return c.icon
+                                                        }())
+                                                            .foregroundStyle({
+                                                                if case .custom(let name) = c {
+                                                                    return store.customCategoryColor(for: name)
+                                                                }
+                                                                return c.tint
+                                                            }())
                                                             .font(.system(size: 12, weight: .semibold))
                                                     )
                                                 Text(c.title)
@@ -2624,6 +2731,17 @@ private struct BudgetView: View {
                                         }
                                         .contextMenu {
                                             if case .custom(let name) = c {
+                                                // ✅ Edit button
+                                                Button {
+                                                    if let customCat = store.customCategoriesWithIcons.first(where: { $0.name == name }) {
+                                                        editingCustomCategory = customCat
+                                                    }
+                                                    Haptics.light()
+                                                } label: {
+                                                    Label("Edit Category", systemImage: "pencil")
+                                                }
+                                                
+                                                // Delete button
                                                 Button(role: .destructive) {
                                                     withAnimation {
                                                         store.deleteCustomCategory(name: name)
@@ -2702,31 +2820,76 @@ private struct BudgetView: View {
             }
             .navigationTitle("Budget")
             .keyboardManagement()  // Global keyboard handling
-            .alert("New Category", isPresented: $showAddCategory) {
-                TextField("Category name", text: $newCategoryName)
-                Button("Cancel", role: .cancel) {
-                    newCategoryName = ""
-                }
-                Button("Add") {
-                    store.addCustomCategory(name: newCategoryName)
-                    newCategoryName = ""
-                }
-            } message: {
-                Text("Enter category name")
+            .sheet(isPresented: $showAddCategory) {
+                FullCategoryEditor(
+                    customCategories: $store.customCategoriesWithIcons,
+                    onSave: { category in
+                        print("🔍 Budget onSave callback received category: \(category.name)")
+                        print("   store.customCategoriesWithIcons.count BEFORE: \(store.customCategoriesWithIcons.count)")
+                        
+                        // 1. مستقیماً اضافه کن به customCategoriesWithIcons
+                        if !store.customCategoriesWithIcons.contains(where: { $0.id == category.id }) {
+                            store.customCategoriesWithIcons.append(category)
+                            print("   ✅ Appended to store.customCategoriesWithIcons")
+                        } else {
+                            print("   ⚠️ Category already exists in store")
+                        }
+                        
+                        print("   store.customCategoriesWithIcons.count AFTER: \(store.customCategoriesWithIcons.count)")
+                        
+                        // 2. Sync با customCategoryNames
+                        if !store.customCategoryNames.contains(category.name) {
+                            store.customCategoryNames.append(category.name)
+                            store.customCategoryNames.sort { $0.lowercased() < $1.lowercased() }
+                        }
+                        
+                        // 3. Save
+                        print("   🔍 Calling saveStore...")
+                        Task {
+                            try? await SupabaseManager.shared.saveStore(store)
+                        }
+                    }
+                )
+                .presentationDetents([.medium, .large])
+            }
+            .sheet(item: $editingCustomCategory) { category in
+                FullCategoryEditor(
+                    customCategories: $store.customCategoriesWithIcons,
+                    editingCategory: category,
+                    onSave: { category in
+                        // 1. مستقیماً اضافه/update کن
+                        if let index = store.customCategoriesWithIcons.firstIndex(where: { $0.id == category.id }) {
+                            store.customCategoriesWithIcons[index] = category
+                        } else if !store.customCategoriesWithIcons.contains(where: { $0.id == category.id }) {
+                            store.customCategoriesWithIcons.append(category)
+                        }
+                        
+                        // 2. Sync names
+                        if !store.customCategoryNames.contains(category.name) {
+                            store.customCategoryNames.append(category.name)
+                            store.customCategoryNames.sort { $0.lowercased() < $1.lowercased() }
+                        }
+                        
+                        // 3. Save
+                        Task {
+                            try? await SupabaseManager.shared.saveStore(store)
+                        }
+                    }
+                )
+                .presentationDetents([.medium, .large])
             }
             .onAppear {
                 editingTotal = store.budgetTotal > 0
                     ? String(format: "%.2f", Double(store.budgetTotal) / 100.0)
                     : ""
                 var map: [Category: String] = [:]
-                for c in Category.allCases {
+                for c in store.allCategories {
                     let v = store.categoryBudget(for: c)
                     map[c] = v > 0 ? String(format: "%.2f", Double(v) / 100.0) : ""
                 }
                 editingCategoryBudgets = map
             }
             .sheet(isPresented: $showPaywall) {
-                SimplePaywallView()
             }
         }
     }
@@ -2739,7 +2902,6 @@ private struct InsightsView: View {
     let goToBudget: () -> Void
     @State private var showAI: Bool = false
     @State private var showAdvancedCharts: Bool = false
-    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
     @State private var showPaywall = false
     
     @AppStorage("notifications.enabled") private var notificationsEnabled: Bool = false
@@ -2946,7 +3108,6 @@ private struct InsightsView: View {
                         // SUBSCRIPTION DISABLED - Export overlay
                         /*
                         .overlay(alignment: .center) {
-                            if !subscriptionManager.isPro {
                                 ZStack {
                                     // Blur background
                                     RoundedRectangle(cornerRadius: 14)
@@ -2999,7 +3160,6 @@ private struct InsightsView: View {
                             }
                         }
                         .zIndex(1)
-                        .padding(.bottom, subscriptionManager.isPro ? 0 : 30)
                         */
                         
                         
@@ -3041,7 +3201,6 @@ private struct InsightsView: View {
                         // SUBSCRIPTION DISABLED - Charts overlay
                         /*
                         .overlay(alignment: .center) {
-                            if !subscriptionManager.isPro {
                                 ZStack {
                                     // Blur background
                                     RoundedRectangle(cornerRadius: 14)
@@ -3094,7 +3253,6 @@ private struct InsightsView: View {
                             }
                         }
                         .zIndex(1)
-                        .padding(.bottom, subscriptionManager.isPro ? 0 : 30)
                         */
                         
                         
@@ -3232,7 +3390,7 @@ private struct InsightsView: View {
             .navigationTitle("Insights")
             .onChange(of: notificationsEnabled) { _, newVal in
                 if newVal {
-                    Task {
+                    Task { try? await Task.sleep(nanoseconds: 100_000_000);
                         await requestNotificationPermissionIfNeeded()
                         // Once permission is granted, schedule recurring reminders and evaluate rules.
                         await Notifications.syncAll(store: store)
@@ -3248,7 +3406,7 @@ private struct InsightsView: View {
                 UNUserNotificationCenter.current().delegate = NotificationCenterDelegate.shared
 
                 if notificationsEnabled {
-                    Task {
+                    Task { try? await Task.sleep(nanoseconds: 100_000_000);
                         // Keep schedules fresh when returning to this screen.
                         await Notifications.syncAll(store: store)
                     }
@@ -3270,7 +3428,6 @@ private struct InsightsView: View {
                 AdvancedChartsView(store: $store)
             }
             .sheet(isPresented: $showPaywall) {
-                SimplePaywallView()
             }
         }
     }
@@ -3403,7 +3560,7 @@ private struct InsightsView: View {
                 )
                 data = csv.data(using: String.Encoding.utf8) ?? Data()
             case .excel:
-                let caps: [Category: Int] = Dictionary(uniqueKeysWithValues: Category.allCases.map { ($0, store.categoryBudget(for: $0)) })
+                let caps: [Category: Int] = Dictionary(uniqueKeysWithValues: store.allCategories.map { ($0, store.categoryBudget(for: $0)) })
                 data = Exporter.makeXLSX(
                     monthKey: monthKey,
                     currency: "EUR",
@@ -3605,9 +3762,9 @@ private struct SettingsView: View {
     @AppStorage("app.theme") private var selectedTheme: String = "dark"
     @State private var refreshID = UUID()
     @EnvironmentObject private var authManager: AuthManager
-    @EnvironmentObject private var firestoreManager: FirestoreManager
+    @EnvironmentObject private var supabaseManager: SupabaseManager
+   
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared  // ← این خط عوض شد
     @State private var showPaywall = false
 
     
@@ -3618,7 +3775,6 @@ private struct SettingsView: View {
                     // SUBSCRIPTION DISABLED - Pro Upgrade Card
                     /*
                     // Pro Upgrade Card (if not pro)
-                    if !subscriptionManager.isPro {
                         Button {
                             showPaywall = true
                         } label: {
@@ -3668,7 +3824,6 @@ private struct SettingsView: View {
                     }
                     
                     // Pro Status Card (if pro)
-                    if subscriptionManager.isPro {
                         DS.Card {
                             HStack(spacing: 16) {
                                 Image(systemName: "checkmark.seal.fill")
@@ -3686,7 +3841,6 @@ private struct SettingsView: View {
                                         .font(.system(size: 17, weight: .bold))
                                         .foregroundStyle(DS.Colors.text)
                                     
-                                    if let expiration = subscriptionManager.expirationDate {
                                         Text("Renews on \(expiration, style: .date)")
                                             .font(.system(size: 14))
                                             .foregroundStyle(DS.Colors.subtext)
@@ -3699,6 +3853,7 @@ private struct SettingsView: View {
                         }
                     }
                     */
+                    
                     
                     // Profile Card
                     NavigationLink {
@@ -3747,11 +3902,11 @@ private struct SettingsView: View {
                     
                     // Sign Out Button
                     Button {
-                        Task {
+                        Task { try? await Task.sleep(nanoseconds: 100_000_000);
                             do {
                                 // Save to cloud before signing out
                                 if let userId = authManager.currentUser?.uid {
-                                    try? await firestoreManager.saveStore(store, userId: userId)
+                                    try? await supabaseManager.saveStore(store)
                                 }
                                 
                                 // Sign out
@@ -4020,6 +4175,7 @@ private struct SettingsView: View {
                                 // Show Onboarding
                                 Button {
                                     UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
+
                                     Haptics.light()
                                 } label: {
                                     supportRow(
@@ -4105,21 +4261,18 @@ private struct SettingsView: View {
             .navigationTitle("Settings")
             .id(refreshID)
             .sheet(isPresented: $showPaywall) {
-                SimplePaywallView()
-                    .environmentObject(authManager)
+                // Paywall removed
+                EmptyView()
             }
         }
     }
     
     private var userEmail: String {
-        authManager.currentUser?.email ?? "User"
+        authManager.userEmail
     }
     
     private var userInitial: String {
-        guard let email = authManager.currentUser?.email else {
-            return "U"
-        }
-        return String(email.prefix(1)).uppercased()
+        authManager.userInitial
     }
     
     // Helper for support rows
@@ -5944,6 +6097,7 @@ private struct TransactionFormCard: View {
 
     let categories: [Category]
     let onAddCategory: () -> Void
+    let onEditCategory: ((CustomCategoryModel) -> Void)?  // ← جدید
 
     var body: some View {
         DS.Card {
@@ -6004,15 +6158,22 @@ private struct TransactionFormCard: View {
                     .font(DS.Typography.caption)
                     .foregroundStyle(DS.Colors.subtext)
 
-                TextField("e.g. 250.00", text: $amountText)
-                    .keyboardType(.decimalPad)
-                    .font(DS.Typography.number)
-                    .padding(12)
-                    .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(DS.Colors.grid, lineWidth: 1)
-                    )
+                HStack(spacing: 8) {
+                    Text(CurrencyFormatter.currentSymbol)
+                        .font(DS.Typography.number)
+                        .foregroundStyle(DS.Colors.subtext)
+                        .padding(.leading, 12)
+                    
+                    TextField("250.00", text: $amountText)
+                        .keyboardType(.decimalPad)
+                        .font(DS.Typography.number)
+                }
+                .padding(12)
+                .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(DS.Colors.grid, lineWidth: 1)
+                )
 
                 Divider().overlay(DS.Colors.grid)
 
@@ -6025,7 +6186,12 @@ private struct TransactionFormCard: View {
                         ForEach(store.allCategories, id: \.self) { c in
                             Button { category = c } label: {
                                 HStack(spacing: 8) {
-                                    Image(systemName: c.icon)
+                                    // ✅ استفاده از icon سفارشی
+                                    if case .custom(let name) = c {
+                                        Image(systemName: store.customCategoryIcon(for: name))
+                                    } else {
+                                        Image(systemName: c.icon)
+                                    }
                                     Text(c.title)
                                 }
                                 .font(DS.Typography.caption)
@@ -6033,7 +6199,14 @@ private struct TransactionFormCard: View {
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 9)
                                 .background(
-                                    (category == c ? c.tint.opacity(0.18) : DS.Colors.surface2),
+                                    // ✅ استفاده از color سفارشی
+                                    {
+                                        if case .custom(let name) = c {
+                                            return category == c ? store.customCategoryColor(for: name).opacity(0.18) : DS.Colors.surface2
+                                        } else {
+                                            return category == c ? c.tint.opacity(0.18) : DS.Colors.surface2
+                                        }
+                                    }(),
                                     in: RoundedRectangle(cornerRadius: 999, style: .continuous)
                                 )
                                 .animation(.spring(response: 0.35, dampingFraction: 0.9), value: category)
@@ -6045,8 +6218,17 @@ private struct TransactionFormCard: View {
                             .buttonStyle(.plain)
                             .contextMenu {
                                 if case .custom(let name) = c {
+                                    // ✅ Edit
+                                    Button {
+                                        if let customCat = store.customCategoriesWithIcons.first(where: { $0.name == name }) {
+                                            onEditCategory?(customCat)
+                                        }
+                                    } label: {
+                                        Label("Edit Category", systemImage: "pencil")
+                                    }
+                                    
+                                    // Delete
                                     Button(role: .destructive) {
-                                        // Delete custom category
                                         if category == c {
                                             category = .other
                                         }
@@ -6116,7 +6298,6 @@ private struct TransactionFormCard: View {
 struct AddTransactionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var store: Store
-    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
     @State private var showPaywall = false
     @State private var showLimitAlert = false
     
@@ -6129,6 +6310,7 @@ struct AddTransactionSheet: View {
     @State private var transactionType: TransactionType = .expense  // ← جدید
     @State private var showAddCategory = false
     @State private var newCategoryName = ""
+    @State private var editingCustomCategory: CustomCategoryModel?  // ← جدید
     @State private var attachmentData: Data? = nil
     @State private var attachmentType: AttachmentType? = nil
     @State private var showImagePicker = false
@@ -6161,22 +6343,13 @@ struct AddTransactionSheet: View {
     }
     
     var body: some View {
-        ZStack {
-            DS.Colors.bg.ignoresSafeArea()
-            
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Text("Add Transaction")
-                            .font(DS.Typography.title)
-                            .foregroundStyle(DS.Colors.text)
-                        Spacer()
-                        Button("Close") { dismiss() }
-                            .foregroundStyle(DS.Colors.subtext)
-                    }
-                    .padding(.top, 8)
-                    
-                    TransactionFormCard(
+        NavigationView {
+            ZStack {
+                DS.Colors.bg.ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        TransactionFormCard(
                         amountText: $amountText,
                         note: $note,
                         date: $date,
@@ -6186,6 +6359,9 @@ struct AddTransactionSheet: View {
                         categories: store.allCategories,
                         onAddCategory: {
                             showAddCategory = true
+                        },
+                        onEditCategory: { customCat in
+                            editingCustomCategory = customCat
                         }
                     )
                     
@@ -6340,56 +6516,28 @@ struct AddTransactionSheet: View {
                             }
                         }
                     }
-                    
-                    Button {
-                        let amount = DS.Format.cents(from: amountText)
-                        guard amount > 0 else { return }
-                        
-                        // SUBSCRIPTION DISABLED - Transaction limit check
-                        /*
-                        // چک کردن محدودیت تعداد تراکنش‌ها
-                        let currentCount = store.transactions.count
-                        let freeLimit = 50
-                        
-                        if !subscriptionManager.isPro && currentCount >= freeLimit {
-                            showLimitAlert = true
-                            return
-                        }
-                        */
-                        
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-                            store.add(Transaction(
-                                amount: amount,
-                                date: date,
-                                category: category,
-                                note: note,
-                                paymentMethod: paymentMethod,
-                                type: transactionType,
-                                attachmentData: attachmentData,
-                                attachmentType: attachmentType
-                            ))
-                        }
-                        Haptics.transactionAdded()  // ← هاپتیک مخصوص
-                        dismiss()
-                    } label: {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                            Text("Save")
-                        }
-                    }
-                    .buttonStyle(DS.PrimaryButton())
-                    .disabled(DS.Format.cents(from: amountText) <= 0)
-                    
-                    Text("Advisor note")
-                        .font(DS.Typography.caption)
-                        .foregroundStyle(DS.Colors.subtext)
-                    
                 }
                 .padding(16)
                 .padding(.bottom, 24)
             }
         }
+        .navigationTitle("Add Transaction")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    dismiss()
+                }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    saveTransaction()
+                }
+                .disabled(DS.Format.cents(from: amountText) <= 0)
+            }
+        }
         .keyboardManagement()  // Global keyboard handling
+        }  // ← Close NavigationView
         .confirmationDialog("Add attachment", isPresented: $showAttachmentOptions) {
             Button("Attach Photo") {
                 showImagePicker = true
@@ -6397,22 +6545,57 @@ struct AddTransactionSheet: View {
             Button("Attach File") {
                 showDocumentPicker = true
             }
-            Button("common.cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {}
         }
-        .alert("New Category", isPresented: $showAddCategory) {
-            TextField("e.g. Coffee", text: $newCategoryName)
-            Button("Add") {
-                let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return }
-                store.addCustomCategory(name: trimmed)
-                category = .custom(trimmed)
-                newCategoryName = ""
-            }
-            Button("common.cancel", role: .cancel) {
-                newCategoryName = ""
-            }
-        } message: {
-            Text("Enter category name")
+        .sheet(isPresented: $showAddCategory) {
+            FullCategoryEditor(
+                customCategories: $store.customCategoriesWithIcons,
+                onSave: { newCategory in
+                    // 1. مستقیماً اضافه کن
+                    if !store.customCategoriesWithIcons.contains(where: { $0.id == newCategory.id }) {
+                        store.customCategoriesWithIcons.append(newCategory)
+                    }
+                    
+                    // 2. Sync names
+                    if !store.customCategoryNames.contains(newCategory.name) {
+                        store.customCategoryNames.append(newCategory.name)
+                        store.customCategoryNames.sort { $0.lowercased() < $1.lowercased() }
+                    }
+                    
+                    // 3. انتخاب کن
+                    category = .custom(newCategory.name)
+                    
+                    // 4. Save
+                    Task {
+                        try? await SupabaseManager.shared.saveStore(store)
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $editingCustomCategory) { customCat in
+            FullCategoryEditor(
+                customCategories: $store.customCategoriesWithIcons,
+                editingCategory: customCat,
+                onSave: { category in
+                    // 1. Update
+                    if let index = store.customCategoriesWithIcons.firstIndex(where: { $0.id == category.id }) {
+                        store.customCategoriesWithIcons[index] = category
+                    }
+                    
+                    // 2. Sync names
+                    if !store.customCategoryNames.contains(category.name) {
+                        store.customCategoryNames.append(category.name)
+                        store.customCategoryNames.sort { $0.lowercased() < $1.lowercased() }
+                    }
+                    
+                    // 3. Save
+                    Task {
+                        try? await SupabaseManager.shared.saveStore(store)
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(imageData: $attachmentData, attachmentType: $attachmentType)
@@ -6429,8 +6612,27 @@ struct AddTransactionSheet: View {
             Text("Free users can create up to 50 transactions. Upgrade to Pro for unlimited transactions!")
         }
         .sheet(isPresented: $showPaywall) {
-            SimplePaywallView()
         }
+    }
+    
+    private func saveTransaction() {
+        let amount = DS.Format.cents(from: amountText)
+        guard amount > 0 else { return }
+        
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+            store.add(Transaction(
+                amount: amount,
+                date: date,
+                category: category,
+                note: note,
+                paymentMethod: paymentMethod,
+                type: transactionType,
+                attachmentData: attachmentData,
+                attachmentType: attachmentType
+            ))
+        }
+        Haptics.transactionAdded()
+        dismiss()
     }
 }
 
@@ -6448,27 +6650,19 @@ private struct EditTransactionSheet: View {
     @State private var transactionType: TransactionType = .expense  // ← جدید
     @State private var showAddCategory = false
     @State private var newCategoryName = ""
+    @State private var editingCustomCategory: CustomCategoryModel?  // ← جدید
 
     private var index: Int? {
         store.transactions.firstIndex { $0.id == transactionID }
     }
 
     var body: some View {
-        ZStack {
-            DS.Colors.bg.ignoresSafeArea()
+        NavigationView {
+            ZStack {
+                DS.Colors.bg.ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("Edit Transaction")
-                        .font(DS.Typography.title)
-                        .foregroundStyle(DS.Colors.text)
-                    Spacer()
-                    Button("Close") { dismiss() }
-                        .foregroundStyle(DS.Colors.subtext)
-                        .buttonStyle(.plain)
-                }
-
-                TransactionFormCard(
+                VStack(alignment: .leading, spacing: 14) {
+                    TransactionFormCard(
                     amountText: $amountText,
                     note: $note,
                     date: $date,
@@ -6478,6 +6672,9 @@ private struct EditTransactionSheet: View {
                     categories: store.allCategories,
                     onAddCategory: {
                         showAddCategory = true
+                    },
+                    onEditCategory: { customCat in
+                        editingCustomCategory = customCat
                     }
                 )
                 
@@ -6566,44 +6763,26 @@ private struct EditTransactionSheet: View {
                     }
                 }
                 
-                Button {
-                    guard let idx = index else { return }
-                    let amount = DS.Format.cents(from: amountText)
-                    guard amount > 0 else { return }
-
-                    let existingID = store.transactions[idx].id
-                    let existingAttachmentData = store.transactions[idx].attachmentData
-                    let existingAttachmentType = store.transactions[idx].attachmentType
-                    
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-                        store.transactions[idx] = Transaction(
-                            id: existingID,
-                            amount: amount,
-                            date: date,
-                            category: category,
-                            note: note,
-                            paymentMethod: paymentMethod,
-                            type: transactionType,
-                            attachmentData: existingAttachmentData,
-                            attachmentType: existingAttachmentType,
-                            lastModified: Date()
-                        )
-                    }
-                    Haptics.success()
-                    dismiss()
-                } label: {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                        Text("Save Changes")
-                    }
-                }
-                .buttonStyle(DS.PrimaryButton())
-                .disabled(DS.Format.cents(from: amountText) <= 0 || index == nil)
-
                 Spacer()
             }
             .padding(16)
         }
+        .navigationTitle("Edit Transaction")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    dismiss()
+                }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    saveChanges()
+                }
+                .disabled(DS.Format.cents(from: amountText) <= 0 || index == nil)
+            }
+        }
+        }  // ← Close NavigationView
         .onAppear {
             guard let idx = index else { return }
             let t = store.transactions[idx]
@@ -6614,21 +6793,83 @@ private struct EditTransactionSheet: View {
             paymentMethod = t.paymentMethod
             transactionType = t.type  // ← جدید
         }
-        .alert("New Category", isPresented: $showAddCategory) {
-            TextField("e.g. Coffee", text: $newCategoryName)
-            Button("Add") {
-                let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return }
-                store.addCustomCategory(name: trimmed)
-                category = .custom(trimmed)
-                newCategoryName = ""
-            }
-            Button("common.cancel", role: .cancel) {
-                newCategoryName = ""
-            }
-        } message: {
-            Text("Enter category name")
+        .sheet(isPresented: $showAddCategory) {
+            FullCategoryEditor(
+                customCategories: $store.customCategoriesWithIcons,
+                onSave: { newCategory in
+                    // 1. اضافه کن
+                    if !store.customCategoriesWithIcons.contains(where: { $0.id == newCategory.id }) {
+                        store.customCategoriesWithIcons.append(newCategory)
+                    }
+                    
+                    // 2. Sync names
+                    if !store.customCategoryNames.contains(newCategory.name) {
+                        store.customCategoryNames.append(newCategory.name)
+                        store.customCategoryNames.sort { $0.lowercased() < $1.lowercased() }
+                    }
+                    
+                    // 3. انتخاب
+                    category = .custom(newCategory.name)
+                    
+                    // 4. Save
+                    Task {
+                        try? await SupabaseManager.shared.saveStore(store)
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
         }
+        .sheet(item: $editingCustomCategory) { customCat in
+            FullCategoryEditor(
+                customCategories: $store.customCategoriesWithIcons,
+                editingCategory: customCat,
+                onSave: { category in
+                    // 1. Update
+                    if let index = store.customCategoriesWithIcons.firstIndex(where: { $0.id == category.id }) {
+                        store.customCategoriesWithIcons[index] = category
+                    }
+                    
+                    // 2. Sync names
+                    if !store.customCategoryNames.contains(category.name) {
+                        store.customCategoryNames.append(category.name)
+                        store.customCategoryNames.sort { $0.lowercased() < $1.lowercased() }
+                    }
+                    
+                    // 3. Save
+                    Task {
+                        try? await SupabaseManager.shared.saveStore(store)
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
+        }
+    }
+    
+    private func saveChanges() {
+        guard let idx = index else { return }
+        let amount = DS.Format.cents(from: amountText)
+        guard amount > 0 else { return }
+
+        let existingID = store.transactions[idx].id
+        let existingAttachmentData = store.transactions[idx].attachmentData
+        let existingAttachmentType = store.transactions[idx].attachmentType
+        
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+            store.transactions[idx] = Transaction(
+                id: existingID,
+                amount: amount,
+                date: date,
+                category: category,
+                note: note,
+                paymentMethod: paymentMethod,
+                type: transactionType,
+                attachmentData: existingAttachmentData,
+                attachmentType: existingAttachmentType,
+                lastModified: Date()
+            )
+        }
+        Haptics.success()
+        dismiss()
     }
 }
 
@@ -7460,6 +7701,25 @@ enum Category: Hashable, Codable {
     }
 }
 
+// MARK: - Custom Category Model
+struct CustomCategoryModel: Codable, Identifiable, Hashable {
+    let id: String
+    var name: String
+    var icon: String
+    var colorHex: String
+    
+    init(id: String = UUID().uuidString, name: String, icon: String = "tag.fill", colorHex: String = "AF52DE") {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.colorHex = colorHex
+    }
+    
+    var color: Color {
+        Color(hex: colorHex) ?? .purple
+    }
+}
+
 // MARK: - Store
 
 struct Store: Hashable, Codable {
@@ -7471,6 +7731,7 @@ struct Store: Hashable, Codable {
     var transactions: [Transaction] = []
     // Custom categories created by user
     var customCategoryNames: [String] = []
+    var customCategoriesWithIcons: [CustomCategoryModel] = []
     // Track deleted transactions for sync (Array for better JSON compatibility)
     var deletedTransactionIds: [String] = []  // UUID as string
     
@@ -7658,7 +7919,10 @@ struct Store: Hashable, Codable {
     }
     
     var allCategories: [Category] {
-        Category.allCases + customCategoryNames.map { Category.custom($0) }
+        // از هر دو لیست استفاده کن
+        let namesFromIcons = customCategoriesWithIcons.map { $0.name }
+        let allCustomNames = Set(customCategoryNames + namesFromIcons)
+        return Category.allCases + allCustomNames.sorted().map { Category.custom($0) }
     }
 
     mutating func addCustomCategory(name: String) {
@@ -7688,6 +7952,22 @@ struct Store: Hashable, Codable {
         for monthKey in categoryBudgetsByMonth.keys {
             categoryBudgetsByMonth[monthKey]?.removeValue(forKey: categoryKey)
         }
+    }
+    
+    // MARK: - Custom Category Helpers
+    
+    func customCategoryIcon(for name: String) -> String {
+        if let custom = customCategoriesWithIcons.first(where: { $0.name == name }) {
+            return custom.icon
+        }
+        return "tag"
+    }
+    
+    func customCategoryColor(for name: String) -> Color {
+        if let custom = customCategoriesWithIcons.first(where: { $0.name == name }) {
+            return custom.color
+        }
+        return .gray
     }
 
     // MARK: - Persistence
@@ -7900,7 +8180,7 @@ enum Analytics {
 
         var bestWatch: Pressure? = nil
 
-        for c in Category.allCases {
+        for c in store.allCategories {
             let cap = store.categoryBudget(for: c)
             guard cap > 0 else { continue }
 
@@ -8097,7 +8377,7 @@ enum Analytics {
         }
 
         // Category budget caps (optional)
-        for c in Category.allCases {
+        for c in store.allCategories {
             let cap = store.categoryBudget(for: c)
             guard cap > 0 else { continue }
 
@@ -8169,7 +8449,7 @@ enum Analytics {
 
         var actions: [String] = []
         // Category cap driven actions (show even with few transactions)
-        for c in Category.allCases {
+        for c in store.allCategories {
             let cap = store.categoryBudget(for: c)
             guard cap > 0 else { continue }
 
@@ -8426,7 +8706,7 @@ private enum Notifications {
 
         // 5) Category cap near/over — edge-triggered per category per month
         let monthTx = Analytics.monthTransactions(store: store)
-        for c in Category.allCases {
+        for c in store.allCategories {
             let cap = store.categoryBudget(for: c)
             guard cap > 0 else { continue }
 
@@ -9065,8 +9345,8 @@ private struct ImportTransactionsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var store: Store
     @EnvironmentObject private var authManager: AuthManager
-    @EnvironmentObject private var firestoreManager: FirestoreManager
-    @StateObject private var subscriptionManager = SimpleSubscriptionManager.shared
+    @EnvironmentObject private var supabaseManager: SupabaseManager
+    
     @State private var showPaywall = false
 
     @State private var pickedURL: URL? = nil
@@ -9132,7 +9412,6 @@ private struct ImportTransactionsScreen: View {
                     // SUBSCRIPTION DISABLED - CSV Import overlay
                     /*
                     .overlay(alignment: .center) {
-                        if !subscriptionManager.isPro {
                             ZStack {
                                 // Blur background
                                 RoundedRectangle(cornerRadius: 14)
@@ -9301,7 +9580,6 @@ private struct ImportTransactionsScreen: View {
             Text(String(format: "You have %d existing transactions", store.transactions.count))
         }
         .sheet(isPresented: $showPaywall) {
-            SimplePaywallView()
         }
     }
 
@@ -9472,7 +9750,7 @@ private struct ImportTransactionsScreen: View {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if t.isEmpty { return .other }
 
-        for c in Category.allCases {
+        for c in store.allCategories {
             if c.title.lowercased() == t { return c }
             if c.storageKey.lowercased() == t { return c }
         }
@@ -9635,8 +9913,8 @@ private struct ImportTransactionsScreen: View {
             store.save(userId: userId)
             
             // Also save to cloud
-            Task {
-                try? await self.firestoreManager.saveStore(store, userId: userId)
+            Task { try? await Task.sleep(nanoseconds: 100_000_000);
+                try? await self.supabaseManager.saveStore(store)
             }
         }
         
@@ -10054,3 +10332,29 @@ private enum CSV {
 //         dismiss()
 //     }
 // }
+
+// MARK: - Color Extensions for CustomCategoryModel
+extension Color {
+    init?(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 6: (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default: return nil
+        }
+        self.init(.sRGB, red: Double(r)/255, green: Double(g)/255, blue: Double(b)/255, opacity: Double(a)/255)
+    }
+    
+    func toHex() -> String {
+        guard let components = UIColor(self).cgColor.components, components.count >= 3 else {
+            return "AF52DE"
+        }
+        let r = Float(components[0])
+        let g = Float(components[1])
+        let b = Float(components[2])
+        return String(format: "%02lX%02lX%02lX", lroundf(r * 255), lroundf(g * 255), lroundf(b * 255))
+    }
+}

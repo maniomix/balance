@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-   Property List.plist
-   balance
-
-   Created by Mani on 16.02.26.
-   Copyright (c) 2026 ___ORGANIZATIONNAME___. All rights reserved.
--->
 <plist version="1.0">
-<dict/>
+<dict>
+    <key>SUPABASE_URL</key>
+    <string>https://dtuphmppefefylcrvyys.supabase.co</string>
+    <key>SUPABASE_ANON_KEY</key>
+    <string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0dXBobXBwZWZlZnlsY3J2eXlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNjE0NzgsImV4cCI6MjA4NjgzNzQ3OH0.D9P1olFansGcEVRabBLfbYsNkGbvlnYvMl0Xim5SyeI</string>
+</dict>
 </plist>

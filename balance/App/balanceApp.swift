@@ -1,22 +1,20 @@
 import SwiftUI
-import FirebaseCore
 
 @main
-struct BalanceApp: App {
-    @StateObject private var authManager = AuthManager()
-    @AppStorage("app.theme") private var selectedTheme: String = "dark"
+struct balanceApp: App {
+    @StateObject private var supabaseManager = SupabaseManager.shared
+    @StateObject private var authManager = AuthManager.shared
     
     init() {
-        FirebaseApp.configure()
+        // Setup app on launch
     }
     
     var body: some Scene {
         WindowGroup {
-            
             ContentView()
-                .preferredColorScheme(selectedTheme == "dark" ? .dark : .light)
+                .preferredColorScheme(.dark)
+                .environmentObject(supabaseManager)
                 .environmentObject(authManager)
-
         }
     }
 }

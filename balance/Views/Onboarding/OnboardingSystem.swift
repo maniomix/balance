@@ -1,6 +1,8 @@
 import SwiftUI
+import Combine
 
 // MARK: - Onboarding Manager
+@MainActor
 class OnboardingManager: ObservableObject {
     @AppStorage("hasCompletedOnboarding") var hasCompletedOnboarding = false
     @AppStorage("onboardingStep") var currentStep = 0
@@ -8,9 +10,14 @@ class OnboardingManager: ObservableObject {
     @Published var showOnboarding = false
     @Published var highlightedFeature: OnboardingFeature?
     
+    static let shared = OnboardingManager()
+    
+    init() {} // ✅ حذف شد private
+    
     func startOnboarding() {
         currentStep = 0
         showOnboarding = true
+        highlightedFeature = OnboardingFeature.allSteps.first
     }
     
     func nextStep() {
@@ -60,10 +67,10 @@ enum OnboardingFeature: String, CaseIterable {
     
     var description: String {
         switch self {
-        case .addTransaction:
-            return "Tap the + button to add your income and expenses. Track every transaction easily!"
         case .viewDashboard:
             return "See your spending overview, trends, and remaining budget at a glance."
+        case .addTransaction:
+            return "View all your transactions and tap + to add new ones. Track every transaction!"
         case .setBudget:
             return "Set monthly budgets to stay on track with your financial goals."
         case .viewInsights:
@@ -97,8 +104,25 @@ enum OnboardingFeature: String, CaseIterable {
         }
     }
     
+    var actionPrompt: String {
+        switch self {
+        case .viewDashboard:
+            return "👉 Tap 'Dashboard' at the bottom"
+        case .addTransaction:
+            return "👉 Tap 'Transactions' at the bottom"
+        case .setBudget:
+            return "👉 Tap 'Budget' at the bottom"
+        case .viewInsights:
+            return "👉 Tap 'Insights' at the bottom"
+        case .cloudSync:
+            return "👉 Look at sync status above"
+        case .settings:
+            return "👉 Tap 'Settings' at the bottom"
+        }
+    }
+    
     static var allSteps: [OnboardingFeature] {
-        [.addTransaction, .viewDashboard, .setBudget, .viewInsights, .cloudSync, .settings]
+        [.viewDashboard, .addTransaction, .setBudget, .viewInsights, .settings]
     }
 }
 

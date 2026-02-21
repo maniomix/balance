@@ -1,39 +1,22 @@
 import SwiftUI
 
-// MARK: - Custom Category Model (جدا از Category enum)
-struct CustomCategoryModel: Codable, Identifiable, Hashable {
-    let id: String
-    var name: String
-    var icon: String
-    var colorHex: String
-    
-    init(id: String = UUID().uuidString, name: String, icon: String = "tag.fill", colorHex: String = "AF52DE") {
-        self.id = id
-        self.name = name
-        self.icon = icon
-        self.colorHex = colorHex
-    }
-    
-    var color: Color {
-        Color(hex: colorHex) ?? .purple
-    }
-}
-
 // MARK: - Full Category Editor با Icon و Color
 struct FullCategoryEditor: View {
     @Environment(\.dismiss) var dismiss
     @Binding var customCategories: [CustomCategoryModel]
     
     let editingCategory: CustomCategoryModel?
+    let onSave: ((CustomCategoryModel) -> Void)?  // ← برگردونه کل model
     
     @State private var name: String = ""
     @State private var selectedIcon: String = "tag.fill"
     @State private var selectedColor: Color = .purple
     @State private var showIconPicker = false
     
-    init(customCategories: Binding<[CustomCategoryModel]>, editingCategory: CustomCategoryModel? = nil) {
+    init(customCategories: Binding<[CustomCategoryModel]>, editingCategory: CustomCategoryModel? = nil, onSave: ((CustomCategoryModel) -> Void)? = nil) {
         self._customCategories = customCategories
         self.editingCategory = editingCategory
+        self.onSave = onSave
         
         if let category = editingCategory {
             _name = State(initialValue: category.name)
@@ -118,11 +101,26 @@ struct FullCategoryEditor: View {
             colorHex: selectedColor.toHex()
         )
         
+        print("🔍 FullCategoryEditor.saveCategory() called")
+        print("   Category: \(category)")
+        print("   customCategories.count BEFORE: \(customCategories.count)")
+        
         if let index = customCategories.firstIndex(where: { $0.id == category.id }) {
+            // Edit - آپدیت می‌کنیم
             customCategories[index] = category
+            print("   ✅ Updated existing category at index \(index)")
         } else {
+            // Add - جدید اضافه می‌کنیم
             customCategories.append(category)
+            print("   ✅ Appended new category")
         }
+        
+        print("   customCategories.count AFTER: \(customCategories.count)")
+        
+        // ✅ Pass کن کل model
+        print("   🔍 Calling onSave callback...")
+        onSave?(category)
+        print("   ✅ onSave callback completed")
         
         dismiss()
     }
@@ -186,31 +184,5 @@ struct IconPickerSheet: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - Color Extensions
-extension Color {
-    init?(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
-        switch hex.count {
-        case 6: (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8: (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default: return nil
-        }
-        self.init(.sRGB, red: Double(r)/255, green: Double(g)/255, blue: Double(b)/255, opacity: Double(a)/255)
-    }
-    
-    func toHex() -> String {
-        guard let components = UIColor(self).cgColor.components, components.count >= 3 else {
-            return "AF52DE"
-        }
-        let r = Float(components[0])
-        let g = Float(components[1])
-        let b = Float(components[2])
-        return String(format: "%02lX%02lX%02lX", lroundf(r * 255), lroundf(g * 255), lroundf(b * 255))
     }
 }

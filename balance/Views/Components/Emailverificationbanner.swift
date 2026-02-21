@@ -1,5 +1,5 @@
 import SwiftUI
-import FirebaseAuth
+
 
 struct EmailVerificationBanner: View {
     @EnvironmentObject private var authManager: AuthManager

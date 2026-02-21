@@ -1,9 +1,7 @@
 import SwiftUI
-import FirebaseAuth
 
 struct UltimateSignUpView: View {
     @EnvironmentObject private var authManager: AuthManager
-    @StateObject private var googleSignInManager = GoogleSignInManager()
     
     @State private var email = ""
     @State private var password = ""
@@ -11,89 +9,82 @@ struct UltimateSignUpView: View {
     @State private var showPassword = false
     @State private var showConfirmPassword = false
     @State private var isLoading = false
-    @State private var showError = false
-    @State private var errorText = ""
-    @State private var showSocialError = false
-    @State private var socialErrorMessage = ""
+    @State private var errorMessage: String?
     
     var onSignIn: () -> Void
     
     var body: some View {
         ZStack {
-            // Background - Same as App
+            // Background
             Color(uiColor: .systemBackground)
                 .ignoresSafeArea()
             
+            // Centered Content
             ScrollView {
-                VStack(spacing: 0) {
-                    Spacer().frame(height: 40)
+                VStack {
+                    Spacer()
                     
-                    // Logo
-                    logoSection
-                        .padding(.bottom, 32)
+                    // Main Content
+                    VStack(spacing: 32) {
+                        // Logo & Title
+                        logoSection
+                        
+                        // Sign Up Form
+                        signUpForm
+                        
+                        // OR Divider
+                        orDivider
+                        
+                        // Social Sign Up
+                        socialButtons
+                        
+                        // Sign In Link
+                        signInLink
+                    }
+                    .padding(.horizontal, 24)
                     
-                    // SignUp Card
-                    signUpCard
-                        .padding(.horizontal, 20)
-                    
-                    // Divider
-                    orDivider
-                        .padding(.vertical, 24)
-                        .padding(.horizontal, 20)
-                    
-                    // Social SignUp
-                    socialButtons
-                        .padding(.horizontal, 20)
-                    
-                    // Sign In Link
-                    signInLink
-                        .padding(.top, 32)
-                    
-                    Spacer().frame(height: 40)
+                    Spacer()
                 }
+                .frame(minHeight: UIScreen.main.bounds.height - 100)
             }
             
+            // Loading Overlay
             if isLoading {
                 loadingOverlay
             }
         }
-        .alert("Sign Up Error", isPresented: $showSocialError) {
-            Button("OK") { }
-        } message: {
-            Text(socialErrorMessage)
-        }
     }
     
-    // MARK: - Logo
+    // MARK: - Logo Section
     
     private var logoSection: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             // App Icon
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(Color(uiColor: .secondarySystemBackground))
-                    .frame(width: 60, height: 60)
+                    .frame(width: 70, height: 70)
                 
                 Image(systemName: "chart.bar.fill")
-                    .font(.system(size: 28))
+                    .font(.system(size: 32))
                     .foregroundStyle(Color(uiColor: .label))
             }
             
             Text("Balance")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .font(.system(size: 32, weight: .bold, design: .rounded))
                 .foregroundStyle(Color(uiColor: .label))
             
             Text("Create your account")
-                .font(.system(size: 14))
+                .font(.system(size: 15))
                 .foregroundStyle(Color(uiColor: .secondaryLabel))
         }
     }
     
-    // MARK: - SignUp Card
+    // MARK: - Sign Up Form
     
-    private var signUpCard: some View {
+    private var signUpForm: some View {
         VStack(spacing: 16) {
-            // Email
+            // Email Field
             VStack(alignment: .leading, spacing: 8) {
                 Text("Email")
                     .font(.system(size: 14, weight: .medium))
@@ -120,7 +111,7 @@ struct UltimateSignUpView: View {
                 )
             }
             
-            // Password
+            // Password Field
             VStack(alignment: .leading, spacing: 8) {
                 Text("Password")
                     .font(.system(size: 14, weight: .medium))
@@ -159,7 +150,7 @@ struct UltimateSignUpView: View {
                 )
             }
             
-            // Confirm Password
+            // Confirm Password Field
             VStack(alignment: .leading, spacing: 8) {
                 Text("Confirm Password")
                     .font(.system(size: 14, weight: .medium))
@@ -203,21 +194,21 @@ struct UltimateSignUpView: View {
                 passwordValidation
             }
             
-            // Error Messages
-            if showError {
-                Text(errorText)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.scale.combined(with: .opacity))
-            }
-            
-            if let error = authManager.errorMessage {
-                Text(error)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.scale.combined(with: .opacity))
+            // Error Message
+            if let errorMessage = errorMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.red)
+                    
+                    Text(errorMessage)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.red)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+                .transition(.scale.combined(with: .opacity))
             }
             
             // Create Account Button
@@ -227,26 +218,25 @@ struct UltimateSignUpView: View {
                 HStack {
                     if isLoading {
                         ProgressView()
-                            .tint(Color(uiColor: .systemBackground))
+                            .tint(.white)
                     } else {
                         Text("Create Account")
                             .font(.system(size: 17, weight: .semibold))
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
+                .frame(height: 54)
                 .background(Color(uiColor: .label))
                 .foregroundStyle(Color(uiColor: .systemBackground))
                 .cornerRadius(12)
             }
             .disabled(isLoading || !isFormValid)
             .opacity(isFormValid ? 1.0 : 0.5)
-            .padding(.top, 8)
         }
-        .padding(20)
+        .padding(24)
         .background(Color(uiColor: .secondarySystemBackground))
         .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
+        .shadow(color: Color.black.opacity(0.05), radius: 15, y: 5)
     }
     
     // MARK: - Password Validation
@@ -277,7 +267,7 @@ struct UltimateSignUpView: View {
         }
     }
     
-    // MARK: - Divider
+    // MARK: - OR Divider
     
     private var orDivider: some View {
         HStack {
@@ -299,28 +289,25 @@ struct UltimateSignUpView: View {
     // MARK: - Social Buttons
     
     private var socialButtons: some View {
-        VStack(spacing: 12) {
-            // Google Sign Up
-            Button {
-                signUpWithGoogle()
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "g.circle.fill")
-                        .font(.system(size: 20))
-                    
-                    Text("Continue with Google")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(Color(uiColor: .secondarySystemBackground))
-                .foregroundStyle(Color(uiColor: .label))
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(uiColor: .separator), lineWidth: 1)
-                )
+        Button {
+            signUpWithGoogle()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "g.circle.fill")
+                    .font(.system(size: 20))
+                
+                Text("Continue with Google")
+                    .font(.system(size: 16, weight: .semibold))
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(Color(uiColor: .secondarySystemBackground))
+            .foregroundStyle(Color(uiColor: .label))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(uiColor: .separator), lineWidth: 1)
+            )
         }
     }
     
@@ -359,7 +346,7 @@ struct UltimateSignUpView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.white)
             }
-            .padding(24)
+            .padding(28)
             .background(.ultraThinMaterial)
             .cornerRadius(16)
         }
@@ -376,12 +363,10 @@ struct UltimateSignUpView: View {
     // MARK: - Actions
     
     private func signUp() {
-        showError = false
-        errorText = ""
+        errorMessage = nil
         
         guard password == confirmPassword else {
-            errorText = "Passwords don't match"
-            showError = true
+            errorMessage = "Passwords don't match"
             return
         }
         
@@ -396,32 +381,24 @@ struct UltimateSignUpView: View {
                 
                 await MainActor.run {
                     isLoading = false
+                    print("✅ Sign up completed")
                 }
             } catch {
                 await MainActor.run {
                     isLoading = false
+                    errorMessage = "Sign up failed: \(error.localizedDescription)"
+                    print("❌ Sign up failed: \(error)")
                 }
             }
         }
     }
     
     private func signUpWithGoogle() {
-        isLoading = true
-        
-        Task {
-            do {
-                _ = try await googleSignInManager.signInWithGoogle()
-                
-                await MainActor.run {
-                    isLoading = false
-                }
-            } catch {
-                await MainActor.run {
-                    isLoading = false
-                    socialErrorMessage = "Google Sign Up failed. Please try again."
-                    showSocialError = true
-                }
-            }
-        }
+        print("🔵 Google Sign Up - Coming soon")
     }
+}
+
+#Preview {
+    UltimateSignUpView(onSignIn: {})
+        .environmentObject(AuthManager.shared)
 }

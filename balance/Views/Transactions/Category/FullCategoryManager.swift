@@ -3,8 +3,15 @@ import SwiftUI
 // MARK: - Full Category Manager
 struct FullCategoryManager: View {
     @Binding var customCategories: [CustomCategoryModel]
+    let onSave: ((CustomCategoryModel) -> Void)?  // ← Updated type
+    
     @State private var showAddCategory = false
     @State private var editingCategory: CustomCategoryModel?
+    
+    init(customCategories: Binding<[CustomCategoryModel]>, onSave: ((CustomCategoryModel) -> Void)? = nil) {
+        self._customCategories = customCategories
+        self.onSave = onSave
+    }
     
     // Default categories (read-only)
     let defaultCategories: [(name: String, icon: String, color: Color)] = [
@@ -84,10 +91,10 @@ struct FullCategoryManager: View {
         .navigationTitle("Manage Categories")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showAddCategory) {
-            FullCategoryEditor(customCategories: $customCategories)
+            FullCategoryEditor(customCategories: $customCategories, onSave: onSave)
         }
         .sheet(item: $editingCategory) { category in
-            FullCategoryEditor(customCategories: $customCategories, editingCategory: category)
+            FullCategoryEditor(customCategories: $customCategories, editingCategory: category, onSave: onSave)
         }
     }
     
