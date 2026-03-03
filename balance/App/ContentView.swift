@@ -129,6 +129,49 @@ struct ContentView: View {
         syncTimer = nil
     }
     
+    /// Manual sync triggered by user - uploads current data then syncs
+    @MainActor
+    private func manualSync() async {
+        guard let userId = authManager.currentUser?.uid else {
+            print("❌ manualSync: No user ID found!")
+            return
+        }
+        
+        print("=================================================")
+        print("🔄 MANUAL SYNC started by user...")
+        print("=================================================")
+        
+        do {
+            // First, upload current state to cloud
+            print("📤 Uploading current data to cloud...")
+            try await supabaseManager.saveStore(store)
+            print("✅ Upload successful!")
+            
+            // Then sync back (to get any changes from other devices)
+            print("📥 Syncing from cloud...")
+            let cloudStore = try await supabaseManager.syncStore(store)
+            store = cloudStore
+            
+            // Save synced data locally
+            store.save(userId: userId)
+            
+            print("✅ MANUAL SYNC completed successfully!")
+            print("   - Transactions: \(store.transactions.count)")
+            print("   - Budgets: \(store.budgetsByMonth.count)")
+            print("=================================================")
+            
+            Haptics.success()
+            
+        } catch {
+            print("❌ MANUAL SYNC failed!")
+            print("   - Error: \(error)")
+            print("   - Description: \(error.localizedDescription)")
+            print("=================================================")
+            
+            Haptics.error()
+        }
+    }
+    
     /// Save store to local only
     private func saveStore() {
         guard let userId = authManager.currentUser?.uid else { return }
