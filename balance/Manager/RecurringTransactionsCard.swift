@@ -1,6 +1,5 @@
 // ==========================================
 // Recurring Transactions Card
-// Card برای نمایش در Insights
 // ==========================================
 
 import SwiftUI
@@ -24,71 +23,49 @@ struct RecurringTransactionsCard: View {
             showRecurringView = true
             Haptics.medium()
         } label: {
-            LiquidGlassCard {
-                HStack(spacing: 16) {
+            DS.Card {
+                HStack(spacing: 14) {
                     // Icon
                     ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.purple.opacity(0.2), .blue.opacity(0.2)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 56, height: 56)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(DS.Colors.accent.opacity(0.1))
+                            .frame(width: 44, height: 44)
                         
-                        Image(systemName: "repeat.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.purple, .blue],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .symbolEffect(.pulse.byLayer, options: .repeating)
+                        Image(systemName: "repeat")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(DS.Colors.accent)
                     }
                     
                     // Content
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Recurring Transactions")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(DS.Colors.text)
-                            
-                            Spacer()
-                            
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(DS.Colors.subtext)
-                        }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Recurring Transactions")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DS.Colors.text)
                         
                         if activeCount > 0 {
-                            HStack(spacing: 12) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.green)
-                                    Text("\(activeCount) active")
-                                        .font(.system(size: 13))
-                                }
+                            HStack(spacing: 8) {
+                                Text("\(activeCount) active")
+                                    .font(.system(size: 12, weight: .medium))
                                 
                                 if monthlyTotal > 0 {
-                                    Text("•")
-                                        .font(.system(size: 13))
-                                    
+                                    Text("·")
                                     Text("€\(DS.Format.currency(monthlyTotal))/mo")
-                                        .font(.system(size: 13, weight: .medium))
+                                        .font(.system(size: 12, weight: .semibold))
                                 }
                             }
                             .foregroundStyle(DS.Colors.subtext)
                         } else {
                             Text("Automate your regular expenses")
-                                .font(.system(size: 13))
+                                .font(.system(size: 12))
                                 .foregroundStyle(DS.Colors.subtext)
                         }
                     }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DS.Colors.subtext)
                 }
             }
         }
@@ -98,8 +75,3 @@ struct RecurringTransactionsCard: View {
         }
     }
 }
-
-// Usage in InsightsView:
-// بعد از Quick Actions card اضافه کن:
-//
-// RecurringTransactionsCard(store: $store)

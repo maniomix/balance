@@ -22,13 +22,11 @@ struct ProfileView: View {
         user?.email ?? "No email"
     }
     
-    private var isEmailVerified: Bool {
-        // Supabase handles verification differently
-        return true
-    }
-    
     private var memberSince: String {
-        return "Member"
+        guard let createdAt = user?.createdAt else { return "Unknown" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter.string(from: createdAt)
     }
     
     var body: some View {
@@ -116,8 +114,66 @@ struct ProfileView: View {
                     .padding(.vertical, 8)
                     .background(DS.Colors.accent.opacity(0.1), in: Capsule())
             }
+            .alert("Edit Display Name", isPresented: $showEditName) {
+                TextField("Your name", text: $displayName)
+                    .textInputAutocapitalization(.words)
+                Button("Cancel", role: .cancel) { }
+                Button("Save") {
+                    saveDisplayName()
+                }
+            } message: {
+                Text("Enter your display name")
+            }
         }
         .padding(.vertical)
+        .onChange(of: selectedImage) { _, newItem in
+            loadSelectedPhoto(newItem)
+        }
+        .onAppear {
+            loadSavedProfile()
+        }
+    }
+    
+    // MARK: - Profile Persistence
+    
+    private func loadSavedProfile() {
+        guard let userId = user?.id.uuidString else { return }
+        
+        if let savedName = UserDefaults.standard.string(forKey: "profile_name_\(userId)") {
+            displayName = savedName
+        }
+        
+        if let savedImageData = UserDefaults.standard.data(forKey: "profile_image_\(userId)"),
+           let uiImage = UIImage(data: savedImageData) {
+            profileImageData = savedImageData
+            profileImage = Image(uiImage: uiImage)
+        }
+    }
+    
+    private func saveDisplayName() {
+        guard let userId = user?.id.uuidString else { return }
+        UserDefaults.standard.set(displayName, forKey: "profile_name_\(userId)")
+    }
+    
+    private func loadSelectedPhoto(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self),
+               let uiImage = UIImage(data: data) {
+                await MainActor.run {
+                    profileImageData = data
+                    profileImage = Image(uiImage: uiImage)
+                    
+                    if let userId = user?.id.uuidString {
+                        // Save compressed version
+                        if let compressed = uiImage.jpegData(compressionQuality: 0.7) {
+                            UserDefaults.standard.set(compressed, forKey: "profile_image_\(userId)")
+                        }
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - Account Info Section
@@ -134,8 +190,6 @@ struct ProfileView: View {
                 accountRow(icon: "envelope.fill", title: "Email", value: userEmail, color: .blue)
                 Divider().padding(.leading, 40)
                 accountRow(icon: "calendar", title: "Member Since", value: memberSince, color: .green)
-                Divider().padding(.leading, 40)
-                accountRow(icon: "checkmark.shield.fill", title: "Verification", value: "Verified", color: .green)
             }
             .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 12))
         }
@@ -203,29 +257,45 @@ struct ProfileView: View {
     
     private var signOutButton: some View {
         Button {
-            signOut()
-        } label: {
-            HStack {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                Text("Sign Out")
-                    .font(.system(size: 16, weight: .semibold))
+            Haptics.warning()
+            Task {
+                do {
+                    // Save to cloud before signing out
+                    if let userId = authManager.currentUser?.uid {
+                        let currentStore = Store.load(userId: userId)
+                        try? await supabaseManager.saveStore(currentStore)
+                    }
+                    try authManager.signOut()
+                } catch {
+                    print("Sign out error: \(error)")
+                }
             }
-            .foregroundColor(.red)
-            .frame(maxWidth: .infinity)
-            .frame(height: 50)
-            .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 16, weight: .medium))
+                
+                Text("Sign Out")
+                    .font(.system(size: 15, weight: .semibold))
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.red.opacity(0.5))
+            }
+            .foregroundStyle(.red)
+            .padding(16)
+            .background {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.red.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.red.opacity(0.12), lineWidth: 0.8)
+                    )
+            }
         }
         .padding(.top, 20)
-    }
-    
-    // MARK: - Actions
-    
-    private func signOut() {
-        do {
-            try authManager.signOut()
-        } catch {
-            print("Sign out error: \(error)")
-        }
     }
 }
 

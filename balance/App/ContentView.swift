@@ -33,6 +33,9 @@ struct ContentView: View {
     // Timer for periodic sync (every 2 minutes)
     @State private var syncTimer: Timer?
     
+    // Last sync time for banner
+    @State private var lastSyncTime: Date?
+    
     // MARK: - Helper Functions
     
     /// Load user data from local and sync with cloud
@@ -132,6 +135,7 @@ struct ContentView: View {
         // Save locally with user ID
         store.save(userId: userId)
     }
+    
 
     var body: some View {
             Group {
@@ -183,6 +187,7 @@ struct ContentView: View {
             .overlay {
                 // ✅ Interactive Tutorial Overlay
             }
+            .preferredColorScheme(selectedTheme == "dark" ? .dark : selectedTheme == "light" ? .light : nil)
         }
         
         private var mainAppView: some View {
@@ -293,6 +298,8 @@ struct ContentView: View {
                         let syncedStore = try await supabaseManager.syncStore(store)
                         store = syncedStore
                         saveStore() // Save with userId
+                        
+                        lastSyncTime = Date() // ✅ Update sync time
                         
                         // Start real-time listener for auto-sync from other devices
                         supabaseManager.startRealtimeSync(userId: userId) {
@@ -1566,6 +1573,8 @@ private struct TransactionsView: View {
     @State private var maxAmountText = ""
     @State private var editingTxID: UUID? = nil
     @State private var showImport = false
+    @State private var showRecurring = false  // ← دکمه Recurring
+    @State private var sortOrder: TransactionSortOrder = .dateNewest  // ← Sort order
 
     // --- Multi-select state for Transactions screen ---
     @State private var isSelecting = false
@@ -1581,6 +1590,25 @@ private struct TransactionsView: View {
     enum SearchScope: String, CaseIterable {
         case thisMonth = "This Month"
         case allTime = "All Time"
+    }
+    
+    // Sort order for transactions
+    enum TransactionSortOrder: String, CaseIterable {
+        case dateNewest = "Newest First"
+        case dateOldest = "Oldest First"
+        case amountHighest = "Highest Amount"
+        case amountLowest = "Lowest Amount"
+        case categoryAZ = "Category A-Z"
+        
+        var icon: String {
+            switch self {
+            case .dateNewest: return "arrow.up.arrow.down.circle"
+            case .dateOldest: return "arrow.up.arrow.down.circle"
+            case .amountHighest: return "arrow.up.arrow.down.circle"
+            case .amountLowest: return "arrow.up.arrow.down.circle"
+            case .categoryAZ: return "arrow.up.arrow.down.circle"
+            }
+        }
     }
     
     private func scheduleUndoCommit() {
@@ -1659,9 +1687,66 @@ private struct TransactionsView: View {
             out = out.filter { $0.date >= start && $0.date < end }
         }
 
-        return out.sorted { $0.date > $1.date }  // Sort by date descending
+        // Apply sort order - ultra simple
+        let result: [Transaction]
+        switch sortOrder {
+        case .dateNewest:
+            result = out.sorted(by: { $0.date > $1.date })
+        case .dateOldest:
+            result = out.sorted(by: { $0.date < $1.date })
+        case .amountHighest:
+            result = out.sorted(by: { $0.amount > $1.amount })
+        case .amountLowest:
+            result = out.sorted(by: { $0.amount < $1.amount })
+        case .categoryAZ:
+            result = out.sorted(by: { $0.category.title.localizedStandardCompare($1.category.title) == .orderedAscending })
+        }
+        
+        return result
     }
 
+    // Group transactions preserving their current order, splitting when the day changes
+    private func groupConsecutiveByDay(_ txs: [Transaction]) -> [ConsecutiveDayGroup] {
+        guard !txs.isEmpty else { return [] }
+        
+        let cal = Calendar.current
+        let fmt = DateFormatter()
+        fmt.locale = .current
+        fmt.setLocalizedDateFormatFromTemplate("EEEE, MMM d")
+        
+        var groups: [ConsecutiveDayGroup] = []
+        var currentDay = cal.startOfDay(for: txs[0].date)
+        var currentItems: [Transaction] = []
+        
+        for tx in txs {
+            let day = cal.startOfDay(for: tx.date)
+            if day == currentDay {
+                currentItems.append(tx)
+            } else {
+                groups.append(ConsecutiveDayGroup(
+                    id: "\(currentDay.timeIntervalSince1970)-\(groups.count)",
+                    day: currentDay,
+                    title: fmt.string(from: currentDay),
+                    items: currentItems
+                ))
+                currentDay = day
+                currentItems = [tx]
+            }
+        }
+        
+        // Last group
+        if !currentItems.isEmpty {
+            groups.append(ConsecutiveDayGroup(
+                id: "\(currentDay.timeIntervalSince1970)-\(groups.count)",
+                day: currentDay,
+                title: fmt.string(from: currentDay),
+                items: currentItems
+            ))
+        }
+        
+        return groups
+    }
+    
     private var activeFilterCount: Int {
         var n = 0
         if selectedCategories.count != store.allCategories.count { n += 1 }
@@ -1711,6 +1796,9 @@ private struct TransactionsView: View {
                 }
                 .navigationDestination(isPresented: $showImport) {
                     ImportTransactionsScreen(store: $store)
+                }
+                .navigationDestination(isPresented: $showRecurring) {
+                    RecurringTransactionsView(store: $store)
                 }
                 .onAppear {
                     // Default: select all (including custom categories)
@@ -1840,9 +1928,7 @@ private struct TransactionsView: View {
         }
         .scrollContentBackground(.hidden)
         .listStyle(.plain)
-        .animation(uiAnim, value: filtered)
-        .animation(uiAnim, value: activeFilterCount)
-        .animation(uiAnim, value: store.transactions)
+        .id("\(sortOrder.rawValue)-\(filtered.count)")  // ✅ Refresh on sort OR new transactions
         .onChange(of: search) { oldValue, newValue in
             // Reset to This Month when search is cleared
             if newValue.isEmpty && searchScope == .allTime {
@@ -1880,6 +1966,14 @@ private struct TransactionsView: View {
     
     private var transactionsList: some View {
         Group {
+            // ✅ Upcoming Payments Banner
+            Section {
+                UpcomingPaymentsBanner(store: $store)
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            
             // Search Scope Selector (if searching)
             if !search.isEmpty {
                 Section {
@@ -1922,15 +2016,54 @@ private struct TransactionsView: View {
             }
             
             // Transactions grouped by day
-            ForEach(Analytics.groupedByDay(filtered), id: \.day) { group in
-                Section {
-                    ForEach(group.items) { t in
-                        transactionRowView(for: t)
+            if sortOrder == .dateNewest || sortOrder == .dateOldest {
+                // Date sort → group by day
+                ForEach(Analytics.groupedByDay(filtered, ascending: sortOrder == .dateOldest), id: \.day) { group in
+                    Section {
+                        ForEach(group.items) { t in
+                            transactionRowView(for: t)
+                        }
+                    } header: {
+                        Text(group.title)
+                            .font(DS.Typography.caption)
+                            .foregroundStyle(DS.Colors.subtext)
                     }
-                } header: {
-                    Text(group.title)
-                        .font(DS.Typography.caption)
-                        .foregroundStyle(DS.Colors.subtext)
+                }
+            } else if sortOrder == .categoryAZ {
+                // Category sort → group by category
+                let grouped = Dictionary(grouping: filtered) { $0.category }
+                let sortedKeys = grouped.keys.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                
+                ForEach(sortedKeys, id: \.self) { cat in
+                    Section {
+                        ForEach(grouped[cat] ?? []) { t in
+                            transactionRowView(for: t)
+                        }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Image(systemName: cat.icon)
+                                .font(.system(size: 10))
+                                .foregroundStyle(cat.tint)
+                            Text(cat.title)
+                                .font(DS.Typography.caption)
+                                .foregroundStyle(DS.Colors.subtext)
+                        }
+                    }
+                }
+            } else {
+                // Amount sort → respect filtered order, group consecutive same-day items
+                let groups = groupConsecutiveByDay(filtered)
+                
+                ForEach(groups, id: \.id) { group in
+                    Section {
+                        ForEach(group.items) { t in
+                            transactionRowView(for: t)
+                        }
+                    } header: {
+                        Text(group.title)
+                            .font(DS.Typography.caption)
+                            .foregroundStyle(DS.Colors.subtext)
+                    }
                 }
             }
         }
@@ -2087,20 +2220,29 @@ private struct TransactionsView: View {
     @ViewBuilder
     private var leadingToolbar: some View {
         if isSelecting {
-            Button("Cancel") {
-                isSelecting = false
-                selectedTxIDs.removeAll()
-                showBulkDeletePopover = false
-            }
-            .foregroundStyle(DS.Colors.subtext)
+            HStack(spacing: 16) {  // ← افزایش spacing
+                Button("Cancel") {
+                    isSelecting = false
+                    selectedTxIDs.removeAll()
+                    showBulkDeletePopover = false
+                }
+                .foregroundStyle(DS.Colors.subtext)
+                .frame(minWidth: 70)  // ← افزایش width
+                .padding(.leading, 4)  // ← padding چپ
 
-            Button("Delete") {
-                guard !selectedTxIDs.isEmpty else { return }
-                showBulkDeletePopover = true
+                Button {
+                    guard !selectedTxIDs.isEmpty else { return }
+                    showBulkDeletePopover = true
+                } label: {
+                    Text("Delete")
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DS.Colors.danger)
+                .disabled(selectedTxIDs.isEmpty)
+                .frame(minWidth: 60)  // ← افزایش width
+                .padding(.trailing, 4)  // ← padding راست
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(DS.Colors.danger)
-            .disabled(selectedTxIDs.isEmpty)
         } else {
             Button("Select") {
                 isSelecting = true
@@ -2118,14 +2260,18 @@ private struct TransactionsView: View {
                 Haptics.selection()
             }
             .foregroundStyle(DS.Colors.subtext)
+            .lineLimit(1)
+            .frame(minWidth: 85)  // ← افزایش width
+            .padding(.trailing, 4)  // ← padding راست
         } else {
             TransactionsTrailingButtons(
                 filtersActive: activeFilterCount > 0,
                 showImport: $showImport,
                 showFilters: $showFilters,
-                showAdd: $showAdd
-                // showRecurring: $showRecurring,  // ← COMMENTED OUT - باگ داره
-                , disabled: store.budgetTotal <= 0,
+                showAdd: $showAdd,
+                showRecurring: $showRecurring,  // ✅ ENABLED
+                sortOrder: $sortOrder,  // ✅ Sort
+                disabled: store.budgetTotal <= 0,
                 uiAnim: uiAnim
             )
             .padding(.trailing, 6)
@@ -2148,35 +2294,63 @@ private struct TransactionsTrailingButtons: View {
     @Binding var showImport: Bool
     @Binding var showFilters: Bool
     @Binding var showAdd: Bool
-    // @Binding var showRecurring: Bool  // ← COMMENTED OUT - باگ داره
+    @Binding var showRecurring: Bool  // ✅ ENABLED
+    @Binding var sortOrder: TransactionsView.TransactionSortOrder  // ✅ Sort
     let disabled: Bool
     let uiAnim: Animation
+    
+    @State private var showSortMenu = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            // COMMENTED OUT - Recurring button - باگ داره
-            // Button {
-            //     Haptics.light()
-            //     showRecurring = true
-            // } label: {
-            //     Image(systemName: "repeat.circle")
-            //         .font(.system(size: 16, weight: .semibold))
-            //         .foregroundStyle(DS.Colors.text)
-            //         .frame(width: 36, height: 36)
-            // }
-            //.buttonStyle(.plain)
-            
-            Button { showImport = true } label: {
-                Image(systemName: "square.and.arrow.down")
+        HStack(alignment: .center, spacing: 12) {
+            // Recurring button - minimal design
+            Button {
+                Haptics.light()
+                showRecurring = true
+            } label: {
+                Image(systemName: "repeat.circle")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(DS.Colors.text)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 36, height: 36, alignment: .center)
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            
+            Button { showImport = true } label: {
+                Image(systemName: "arrow.down.circle")  // ← Circle version
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(DS.Colors.text)
+                    .frame(width: 36, height: 36, alignment: .center)
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            
+            // Sort button with menu
+            Menu {
+                ForEach(TransactionsView.TransactionSortOrder.allCases, id: \.self) { order in
+                    Button {
+                        sortOrder = order
+                        Haptics.selection()
+                    } label: {
+                        HStack {
+                            Text(order.rawValue)
+                            if sortOrder == order {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: sortOrder.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(DS.Colors.text)
+                    .frame(width: 36, height: 36, alignment: .center)
             }
             .buttonStyle(.plain)
             .disabled(disabled)
 
             Button { showFilters = true } label: {
-                ZStack {
+                ZStack(alignment: .center) {
                     // Badge برای فیلتر فعال
                     if filtersActive {
                         Circle()
@@ -2190,17 +2364,17 @@ private struct TransactionsTrailingButtons: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(filtersActive ? Color.black : DS.Colors.text)
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 36, height: 36, alignment: .center)
                 .animation(uiAnim, value: filtersActive)
             }
             .buttonStyle(.plain)
             .disabled(disabled)
 
             Button { showAdd = true } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .bold))
+                Image(systemName: "plus.circle")  // ← Circle version
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(DS.Colors.text)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 36, height: 36, alignment: .center)
             }
             .buttonStyle(.plain)
             .disabled(disabled)
@@ -2544,17 +2718,25 @@ private struct BudgetView: View {
     @Binding var store: Store
     @State private var showPaywall = false
 
+
     @State private var editingTotal = ""
     @State private var editingCategoryBudgets: [Category: String] = [:]
     @State private var showAddCategory = false
     @State private var newCategoryName = ""
     @State private var editingCustomCategory: CustomCategoryModel?
     @FocusState private var focus: Bool
+    
+    // Check if budget has changed
+    private var hasChanges: Bool {
+        let newValue = DS.Format.cents(from: editingTotal)
+        return newValue != store.budgetTotal && newValue > 0
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    
                     DS.Card {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Set Monthly Budget")
@@ -2580,13 +2762,15 @@ private struct BudgetView: View {
                                     )
 
                                 Button(store.budgetTotal <= 0 ? "Start" : "Update") {
-                        
                                     let v = DS.Format.cents(from: editingTotal)
                                     store.budgetTotal = max(0, v)
-                                    focus = false
+                                    focus = false  // Dismiss keyboard
+                                    Haptics.success()
                                 }
                                 .buttonStyle(DS.PrimaryButton())
                                 .frame(width: 140)
+                                .disabled(!hasChanges)  // Disable if no changes
+                                .opacity(hasChanges ? 1.0 : 0.5)  // Visual feedback
                             }
 
                             if store.budgetTotal <= 0 {
@@ -2748,6 +2932,11 @@ private struct BudgetView: View {
                                                         editingCategoryBudgets.removeValue(forKey: c)
                                                     }
                                                     Haptics.medium()
+                                                    
+                                                    // Save to Supabase
+                                                    Task {
+                                                        try? await SupabaseManager.shared.saveStore(store)
+                                                    }
                                                 } label: {
                                                     Label("Delete Category", systemImage: "trash")
                                                 }
@@ -2820,6 +3009,12 @@ private struct BudgetView: View {
             }
             .navigationTitle("Budget")
             .keyboardManagement()  // Global keyboard handling
+            .onAppear {
+                // Initialize with current budget
+                if store.budgetTotal > 0 {
+                    editingTotal = DS.Format.currency(store.budgetTotal)
+                }
+            }
             .sheet(isPresented: $showAddCategory) {
                 FullCategoryEditor(
                     customCategories: $store.customCategoriesWithIcons,
@@ -2900,7 +3095,6 @@ private struct BudgetView: View {
 private struct InsightsView: View {
     @Binding var store: Store
     let goToBudget: () -> Void
-    @State private var showAI: Bool = false
     @State private var showAdvancedCharts: Bool = false
     @State private var showPaywall = false
     
@@ -2940,6 +3134,9 @@ private struct InsightsView: View {
                             }
                         }
                     } else {
+                        // ✅ AI Financial Advisor (بالای بالا!)
+                        // AIAdvisorCard(store: $store)  // ← COMMENTED OUT - فعلاً نیاز نیست
+                        
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Analytical Report")
@@ -3316,39 +3513,6 @@ private struct InsightsView: View {
 
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                HStack {
-                                    Text("AI Analysis")
-                                        .font(DS.Typography.section)
-                                        .foregroundStyle(DS.Colors.text)
-                                    Spacer()
-                                    Text("AI Powered")
-                                        .font(DS.Typography.caption)
-                                        .foregroundStyle(DS.Colors.subtext)
-                                }
-
-                                Text("Get insights from AI")
-                                    .font(DS.Typography.body)
-                                    .foregroundStyle(DS.Colors.subtext)
-
-                                Button {
-                                    showAI = true
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "wand.and.stars")
-                                        Text("Analyze")
-                                    }
-                                }
-                                .buttonStyle(DS.PrimaryButton())
-                            }
-                        }
-                        .sheet(isPresented: $showAI) {
-                            AIInsightsView(store: $store)
-                                .presentationDetents([.large])
-                                .presentationDragIndicator(.visible)
-                        }
-
-                        DS.Card {
-                            VStack(alignment: .leading, spacing: 10) {
                                 Text("Quick Actions")
                                     .font(DS.Typography.section)
                                     .foregroundStyle(DS.Colors.text)
@@ -3381,6 +3545,9 @@ private struct InsightsView: View {
                                 }
                             }
                         }
+                        
+                        // ✅ Recurring Transactions Card
+                        // RecurringTransactionsCard(store: $store)  // ← COMMENTED OUT - فعلاً نیاز نیست
                     }
                 }
                 .padding(.horizontal, 16)
@@ -3895,39 +4062,6 @@ private struct SettingsView: View {
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 14))
                                     .foregroundStyle(DS.Colors.subtext)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    
-                    // Sign Out Button
-                    Button {
-                        Task { try? await Task.sleep(nanoseconds: 100_000_000);
-                            do {
-                                // Save to cloud before signing out
-                                if let userId = authManager.currentUser?.uid {
-                                    try? await supabaseManager.saveStore(store)
-                                }
-                                
-                                // Sign out
-                                try authManager.signOut()
-                            } catch {
-                                print("Error signing out: \(error)")
-                            }
-                        }
-                        Haptics.warning()
-                    } label: {
-                        DS.Card {
-                            HStack {
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(DS.Colors.negative)
-                                
-                                Text("Sign Out")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(DS.Colors.negative)
-                                
-                                Spacer()
                             }
                         }
                     }
@@ -4997,232 +5131,6 @@ private struct LicenseCard: View {
     }
 }
 
-private struct AIInsightsView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var store: Store
-
-    // Set this to your Cloudflare Worker endpoint.
-    private let endpoint = URL(string: "https://empty-breeze-77fb.mani-acc7282.workers.dev/analyze")!
-
-    @State private var isLoading: Bool = false
-    @State private var errorText: String? = nil
-    @State private var result: AIAnalysisResult? = nil
-    @State private var lastAnalyzedAt: Date? = nil
-
-    private var monthTitle: String {
-        let fmt = DateFormatter()
-        fmt.locale = .current
-        fmt.setLocalizedDateFormatFromTemplate("MMMM yyyy")
-        return fmt.string(from: store.selectedMonth)
-    }
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.bg.ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: 14) {
-                        DS.Card {
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack {
-                                    Text("AI Insights")
-                                        .font(DS.Typography.title)
-                                        .foregroundStyle(DS.Colors.text)
-                                    Spacer()
-                                    Button("Close") { dismiss() }
-                                        .foregroundStyle(DS.Colors.subtext)
-                                }
-
-                                Text("\(monthTitle)")
-                                    .font(DS.Typography.caption)
-                                    .foregroundStyle(DS.Colors.subtext)
-
-                                Text(
-                                    "Tip: AI-generated insights based on your spending data. Results may be imperfect — use as guidance."
-                                )
-                                .font(DS.Typography.caption)
-                                .foregroundStyle(DS.Colors.subtext)
-
-                                if let errorText {
-                                    DS.StatusLine(
-                                        title: "Couldn’t analyze",
-                                        detail: errorText,
-                                        level: .watch
-                                    )
-                                }
-
-                                if isLoading {
-                                    HStack(spacing: 10) {
-                                        ProgressView()
-                                        Text("Analyzing...")
-                                            .font(DS.Typography.body)
-                                            .foregroundStyle(DS.Colors.subtext)
-                                    }
-                                    .padding(.vertical, 6)
-                                }
-
-                                Button {
-                                    Task { await analyze() }
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "sparkles")
-                                        Text(result == nil ? "Run analysis" : "Re-analyze")
-                                    }
-                                }
-                                .buttonStyle(DS.PrimaryButton())
-                                .disabled(isLoading)
-
-                                if let lastAnalyzedAt {
-                                    Text("Last analyzed: \(DS.Format.relativeDateTime(lastAnalyzedAt))")
-                                        .font(DS.Typography.caption)
-                                        .foregroundStyle(DS.Colors.subtext)
-                                }
-                            }
-                        }
-
-                        if let result {
-                            DS.Card {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Summary")
-                                        .font(DS.Typography.section)
-                                        .foregroundStyle(DS.Colors.text)
-
-                                    Text(result.summary)
-                                        .font(DS.Typography.body)
-                                        .foregroundStyle(DS.Colors.text)
-                                }
-                            }
-
-                            DS.Card {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Insights")
-                                        .font(DS.Typography.section)
-                                        .foregroundStyle(DS.Colors.text)
-
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        ForEach(result.insights, id: \.self) { s in
-                                            Text("• \(s)")
-                                                .font(DS.Typography.body)
-                                                .foregroundStyle(DS.Colors.text)
-                                        }
-                                    }
-                                }
-                            }
-
-                            DS.Card {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Actions")
-                                        .font(DS.Typography.section)
-                                        .foregroundStyle(DS.Colors.text)
-
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        ForEach(result.actions, id: \.self) { s in
-                                            Text("• \(s)")
-                                                .font(DS.Typography.body)
-                                                .foregroundStyle(DS.Colors.text)
-                                        }
-                                    }
-                                }
-                            }
-
-                            DS.Card {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Risk")
-                                        .font(DS.Typography.section)
-                                        .foregroundStyle(DS.Colors.text)
-
-                                    DS.StatusLine(
-                                        title: "Risk level",
-                                        detail: result.riskLevel.uppercased(),
-                                        level: result.riskLevelLevel
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 10)
-                    .padding(.bottom, 24)
-                }
-            }
-            .navigationBarHidden(true)
-        }
-        .onAppear {
-            loadCachedResultIfAvailable()
-        }
-    }
-
-    private func analyze() async {
-        guard !isLoading else { return }
-        isLoading = true
-        errorText = nil
-        defer { isLoading = false }
-
-        do {
-            let payload = AIAnalysisPayload.from(store: store)
-            let reqData = try JSONEncoder().encode(payload)
-
-            var req = URLRequest(url: endpoint)
-            req.httpMethod = "POST"
-            req.httpBody = reqData
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                let body = String(data: data, encoding: .utf8) ?? ""
-                throw NSError(domain: "AI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server error \(http.statusCode). \(body)"])
-            }
-
-            let decoded = try JSONDecoder().decode(AIAnalysisResult.self, from: data)
-            result = decoded
-            lastAnalyzedAt = Date()
-            saveCachedResult(decoded, analyzedAt: lastAnalyzedAt!)
-        } catch {
-            errorText = error.localizedDescription
-        }
-    }
-
-
-    private var cacheKey: String {
-        let cal = Calendar.current
-        let comps = cal.dateComponents([.year, .month], from: store.selectedMonth)
-        let y = comps.year ?? 0
-        let m = comps.month ?? 0
-        return String(format: "ai.analysis.%04d-%02d", y, m)
-    }
-
-    private func loadCachedResultIfAvailable() {
-        // Load cached analysis per-month so reopening the sheet does not re-run.
-        guard let data = UserDefaults.standard.data(forKey: cacheKey) else { return }
-        do {
-            let cached = try JSONDecoder().decode(AICachedAnalysis.self, from: data)
-            self.result = cached.result
-            self.lastAnalyzedAt = cached.analyzedAt
-        } catch {
-            // If cache is corrupted or schema changed, ignore.
-        }
-    }
-
-    private func saveCachedResult(_ result: AIAnalysisResult, analyzedAt: Date) {
-        let cached = AICachedAnalysis(result: result, analyzedAt: analyzedAt)
-        do {
-            let data = try JSONEncoder().encode(cached)
-            UserDefaults.standard.set(data, forKey: cacheKey)
-        } catch {
-            // Ignore cache save failures.
-        }
-    }
-}
-
-
-private struct AICachedAnalysis: Codable {
-    let result: AIAnalysisResult
-    let analyzedAt: Date
-}
-
 private struct AIAnalysisPayload: Codable {
     struct DayTotal: Codable { let day: Int; let amount: Int }
     struct CategoryTotal: Codable { let name: String; let amount: Int }
@@ -6048,6 +5956,7 @@ private struct InsightRow: View {
 
 private struct MonthPicker: View {
     @Binding var selectedMonth: Date
+    @State private var showMonthYearPicker = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -6072,6 +5981,13 @@ private struct MonthPicker: View {
                     .padding(.vertical, 8)
                     .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5)
+                    .onEnded { _ in
+                        Haptics.medium()
+                        showMonthYearPicker = true
+                    }
+            )
 
             Button {
                 Haptics.monthChanged()  // ← هاپتیک مخصوص
@@ -6082,6 +5998,9 @@ private struct MonthPicker: View {
                     .padding(8)
                     .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
+        }
+        .sheet(isPresented: $showMonthYearPicker) {
+            MonthYearPickerSheet(selectedDate: $selectedMonth)
         }
     }
 }
@@ -6233,6 +6152,11 @@ private struct TransactionFormCard: View {
                                             category = .other
                                         }
                                         store.deleteCustomCategory(name: name)
+                                        
+                                        // Save to Supabase
+                                        Task {
+                                            try? await SupabaseManager.shared.saveStore(store)
+                                        }
                                     } label: {
                                         Label("Delete Category", systemImage: "trash")
                                     }
@@ -7735,8 +7659,8 @@ struct Store: Hashable, Codable {
     // Track deleted transactions for sync (Array for better JSON compatibility)
     var deletedTransactionIds: [String] = []  // UUID as string
     
-    // MARK: - New Features
-    // var recurringTransactions: [RecurringTransaction] = []  // COMMENTED OUT - باگ داره
+    // MARK: - Recurring Transactions
+    var recurringTransactions: [RecurringTransaction] = []  // ✅ ENABLED با دیزاین جدید
 
     static func monthKey(_ date: Date) -> String {
         let cal = Calendar.current
@@ -7937,17 +7861,20 @@ struct Store: Hashable, Codable {
     }
     
     mutating func deleteCustomCategory(name: String) {
-        // Remove from custom categories list
+        // 1. Remove from customCategoryNames
         customCategoryNames.removeAll { $0 == name }
         
-        // Update all transactions using this category to "Other"
+        // 2. Remove from customCategoriesWithIcons
+        customCategoriesWithIcons.removeAll { $0.name == name }
+        
+        // 3. Update all transactions using this category to "Other"
         for i in transactions.indices {
             if case .custom(let catName) = transactions[i].category, catName == name {
                 transactions[i].category = .other
             }
         }
         
-        // Remove category budgets for this category (all months)
+        // 4. Remove category budgets for this category (all months)
         let categoryKey = Category.custom(name).storageKey
         for monthKey in categoryBudgetsByMonth.keys {
             categoryBudgetsByMonth[monthKey]?.removeValue(forKey: categoryKey)
@@ -8125,6 +8052,17 @@ enum Analytics {
         let title: String
         let items: [Transaction]
     }
+    
+}
+
+private struct ConsecutiveDayGroup: Identifiable {
+    let id: String
+    let day: Date
+    let title: String
+    let items: [Transaction]
+}
+
+extension Analytics {
 
     static func monthTransactions(store: Store) -> [Transaction] {
         let cal = Calendar.current
@@ -8328,7 +8266,7 @@ enum Analytics {
             .sorted { $0.total > $1.total }
     }
 
-    static func groupedByDay(_ tx: [Transaction]) -> [DayGroup] {
+    static func groupedByDay(_ tx: [Transaction], ascending: Bool = false) -> [DayGroup] {
         let cal = Calendar.current
         let groups = Dictionary(grouping: tx) { cal.startOfDay(for: $0.date) }
 
@@ -8338,9 +8276,13 @@ enum Analytics {
 
         return groups
             .map { (day, items) in
-                DayGroup(day: day, title: fmt.string(from: day), items: items.sorted { $0.date > $1.date })
+                // Sort items within day by date
+                let sorted = ascending
+                    ? items.sorted { $0.date < $1.date }
+                    : items.sorted { $0.date > $1.date }
+                return DayGroup(day: day, title: fmt.string(from: day), items: sorted)
             }
-            .sorted { $0.day > $1.day }
+            .sorted { ascending ? $0.day < $1.day : $0.day > $1.day }
     }
 
     static func generateInsights(store: Store) -> [Insight] {

@@ -13,22 +13,15 @@ struct AdvancedChartsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Period Selector
                     periodSelector
-                    
-                    // Spending Trend
                     spendingTrendCard
-                    
-                    // Category Distribution
                     categoryPieCard
-                    
-                    // Income vs Expense
                     incomeExpenseCard
-                    
-                    // Monthly Comparison
                     monthlyComparisonCard
+                    
+                    Spacer(minLength: 30)
                 }
-                .padding()
+                .padding(.vertical)
             }
             .background(DS.Colors.bg.ignoresSafeArea())
             .navigationTitle("Charts")
@@ -39,7 +32,7 @@ struct AdvancedChartsView: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(DS.Colors.subtext)
                     }
                 }
@@ -47,125 +40,88 @@ struct AdvancedChartsView: View {
         }
     }
     
+    // MARK: - Period Selector
+    
     private var periodSelector: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(ChartPeriod.allCases, id: \.self) { period in
-                    Button {
-                        Haptics.selection()
+        HStack(spacing: 6) {
+            ForEach(ChartPeriod.allCases, id: \.self) { period in
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                         selectedPeriod = period
-                    } label: {
-                        Text(period.displayName)
-                            .font(.system(size: 14, weight: selectedPeriod == period ? .semibold : .medium))
-                            .foregroundStyle(selectedPeriod == period ? .black : DS.Colors.text)  // ← سیاه وقتی selected
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(
-                                selectedPeriod == period ?
-                                Color.white :  // ← سفید وقتی selected
-                                DS.Colors.surface2,
-                                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .stroke(
-                                        selectedPeriod == period ?
-                                        Color.white.opacity(0.3) :
-                                        DS.Colors.grid,
-                                        lineWidth: 1
-                                    )
-                            )
                     }
-                    .buttonStyle(.plain)
+                    Haptics.selection()
+                } label: {
+                    Text(period.displayName)
+                        .font(.system(size: 13, weight: selectedPeriod == period ? .semibold : .medium, design: .rounded))
+                        .foregroundStyle(selectedPeriod == period ? Color(uiColor: .systemBackground) : DS.Colors.subtext)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            selectedPeriod == period
+                            ? AnyShapeStyle(Color(uiColor: .label))
+                            : AnyShapeStyle(DS.Colors.surface2),
+                            in: Capsule()
+                        )
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal)
         }
+        .padding(.horizontal)
     }
+    
+    // MARK: - Spending Trend
     
     private var spendingTrendCard: some View {
-        DS.Card {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 20))
-                        .foregroundStyle(DS.Colors.accent)
-                    
-                    Text("Spending Trend")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(DS.Colors.text)
-                    
-                    Spacer()
-                }
-                
-                SpendingTrendChart(store: store, period: selectedPeriod)
-                    .frame(height: 200)
-            }
+        chartCard(icon: "chart.line.uptrend.xyaxis", title: "Spending Trend") {
+            SpendingTrendChart(store: store, period: selectedPeriod)
+                .frame(height: 200)
         }
-        .padding(.horizontal)
     }
+    
+    // MARK: - Category Pie
     
     private var categoryPieCard: some View {
-        DS.Card {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Image(systemName: "chart.pie.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(DS.Colors.accent)
-                    
-                    Text("Category Breakdown")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(DS.Colors.text)
-                    
-                    Spacer()
-                }
-                
-                CategoryPieChart(store: store, period: selectedPeriod)
-                    .frame(height: 250)
-            }
+        chartCard(icon: "chart.pie.fill", title: "Category Breakdown") {
+            CategoryPieChart(store: store, period: selectedPeriod)
         }
-        .padding(.horizontal)
     }
+    
+    // MARK: - Income vs Expense
     
     private var incomeExpenseCard: some View {
-        DS.Card {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(DS.Colors.accent)
-                    
-                    Text("Income vs Expense")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(DS.Colors.text)
-                    
-                    Spacer()
-                }
-                
-                IncomeExpenseChart(store: store, period: selectedPeriod)
-                    .frame(height: 200)
-            }
+        chartCard(icon: "chart.bar.fill", title: "Income vs Expense") {
+            IncomeExpenseChart(store: store, period: selectedPeriod)
+                .frame(height: 200)
         }
-        .padding(.horizontal)
     }
     
+    // MARK: - Monthly Comparison
+    
     private var monthlyComparisonCard: some View {
+        chartCard(icon: "chart.bar.xaxis", title: "Budget vs Spent") {
+            MonthlyComparisonChart(store: store, period: selectedPeriod)
+                .frame(height: 220)
+        }
+    }
+    
+    // MARK: - Chart Card Template
+    
+    private func chartCard<Content: View>(icon: String, title: String, @ViewBuilder content: () -> Content) -> some View {
         DS.Card {
             VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Image(systemName: "chart.bar.xaxis")
-                        .font(.system(size: 20))
+                HStack(spacing: 10) {
+                    Image(systemName: icon)
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(DS.Colors.accent)
                     
-                    Text("Monthly Comparison")
-                        .font(.system(size: 18, weight: .bold))
+                    Text(title)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DS.Colors.text)
                     
                     Spacer()
                 }
                 
-                MonthlyComparisonChart(store: store, period: selectedPeriod)
-                    .frame(height: 220)
+                content()
             }
         }
         .padding(.horizontal)
@@ -181,8 +137,8 @@ enum ChartPeriod: CaseIterable {
     
     var displayName: String {
         switch self {
-        case .last3Months: return "Last 3 Months"
-        case .last6Months: return "Last 6 Months"
+        case .last3Months: return "3 Months"
+        case .last6Months: return "6 Months"
         case .thisYear: return "This Year"
         }
     }
@@ -209,41 +165,38 @@ struct SpendingTrendChart: View {
         
         for i in (0..<period.monthsCount).reversed() {
             guard let date = calendar.date(byAdding: .month, value: -i, to: now) else { continue }
-            
             let spent = store.spent(for: date)
-            let monthName = monthFormatter.string(from: date)
-            
+            let monthName = shortMonth(date)
             result.append(MonthData(month: monthName, amount: spent, date: date))
         }
         
         return result
     }
     
-    private var monthFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM"
-        return formatter
-    }
-    
     var body: some View {
-        if data.isEmpty {
-            Text("No data")
-                .foregroundStyle(DS.Colors.subtext)
-                .frame(maxWidth: .infinity, alignment: .center)
+        if data.isEmpty || data.allSatisfy({ $0.amount == 0 }) {
+            emptyChartView
         } else {
             Chart(data) { item in
+                AreaMark(
+                    x: .value("Month", item.month),
+                    y: .value("Amount", Double(item.amount) / 100.0)
+                )
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [DS.Colors.accent.opacity(0.2), DS.Colors.accent.opacity(0.02)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .interpolationMethod(.catmullRom)
+                
                 LineMark(
                     x: .value("Month", item.month),
                     y: .value("Amount", Double(item.amount) / 100.0)
                 )
                 .foregroundStyle(DS.Colors.accent)
-                .interpolationMethod(.catmullRom)
-                
-                AreaMark(
-                    x: .value("Month", item.month),
-                    y: .value("Amount", Double(item.amount) / 100.0)
-                )
-                .foregroundStyle(DS.Colors.accent.opacity(0.1))
+                .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .interpolationMethod(.catmullRom)
                 
                 PointMark(
@@ -251,31 +204,11 @@ struct SpendingTrendChart: View {
                     y: .value("Amount", Double(item.amount) / 100.0)
                 )
                 .foregroundStyle(DS.Colors.accent)
+                .symbolSize(30)
             }
-            .chartYAxisLabel("€")
-            .chartXAxis {
-                AxisMarks(values: .automatic) { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                        .font(.system(size: 11))
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                        .font(.system(size: 11))
-                }
-            }
+            .chartStyle()
         }
     }
-}
-
-struct MonthData: Identifiable {
-    let id = UUID()
-    let month: String
-    let amount: Int
-    let date: Date
 }
 
 // MARK: - Category Pie Chart
@@ -303,65 +236,65 @@ struct CategoryPieChart: View {
         
         return categoryTotals
             .sorted { $0.value > $1.value }
-            .prefix(6)
+            .prefix(8)
             .map { CategoryData(category: $0.key, amount: $0.value) }
+    }
+    
+    private var totalAmount: Int {
+        data.reduce(0) { $0 + $1.amount }
     }
     
     var body: some View {
         if data.isEmpty {
-            Text("No data")
-                .foregroundStyle(DS.Colors.subtext)
-                .frame(maxWidth: .infinity, alignment: .center)
+            emptyChartView
         } else {
-            VStack(spacing: 16) {
+            VStack(spacing: 20) {
+                // Donut chart with manual colors
                 Chart(data) { item in
                     SectorMark(
-                        angle: .value("Amount", Double(item.amount) / 100.0),
-                        innerRadius: .ratio(0.5),
-                        angularInset: 2.0
+                        angle: .value("Amount", Double(item.amount)),
+                        innerRadius: .ratio(0.55),
+                        angularInset: 1.5
                     )
-                    .cornerRadius(4)
-                    .foregroundStyle(by: .value("Category", item.category.title))
+                    .cornerRadius(3)
+                    .foregroundStyle(item.category.tint)
                 }
+                .chartLegend(.hidden)
                 .frame(height: 180)
                 
-                // Legend
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                // Custom legend with actual category colors
+                VStack(spacing: 6) {
                     ForEach(data) { item in
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(categoryColor(for: item.category))
-                                .frame(width: 8, height: 8)
+                        HStack(spacing: 10) {
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(item.category.tint)
+                                .frame(width: 14, height: 14)
                             
                             Text(item.category.title)
-                                .font(.system(size: 11))
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
                                 .foregroundStyle(DS.Colors.text)
                             
                             Spacer()
                             
-                            Text(DS.Format.money(item.amount))
-                                .font(.system(size: 11, weight: .semibold))
+                            // Percentage
+                            let pct = totalAmount > 0 ? Double(item.amount) / Double(totalAmount) * 100 : 0
+                            Text("\(Int(pct))%")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
                                 .foregroundStyle(DS.Colors.subtext)
+                                .frame(width: 36, alignment: .trailing)
+                            
+                            Text(DS.Format.money(item.amount))
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundStyle(DS.Colors.text)
+                                .frame(width: 80, alignment: .trailing)
                         }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 4)
                     }
                 }
             }
         }
     }
-    
-    private func categoryColor(for category: Category) -> Color {
-        let colors: [Color] = [
-            .blue, .green, .orange, .purple, .red, .pink, .yellow, .cyan
-        ]
-        let index = Category.allCases.firstIndex(of: category) ?? 0
-        return colors[index % colors.count]
-    }
-}
-
-struct CategoryData: Identifiable {
-    let id = UUID()
-    let category: Category
-    let amount: Int
 }
 
 // MARK: - Income vs Expense Chart
@@ -380,7 +313,7 @@ struct IncomeExpenseChart: View {
             
             let income = store.income(for: date)
             let expense = store.spent(for: date)
-            let monthName = monthFormatter.string(from: date)
+            let monthName = shortMonth(date)
             
             result.append(IncomeExpenseData(month: monthName, income: income, expense: expense))
         }
@@ -388,57 +321,38 @@ struct IncomeExpenseChart: View {
         return result
     }
     
-    private var monthFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM"
-        return formatter
-    }
-    
     var body: some View {
-        if data.isEmpty {
-            Text("No data")
-                .foregroundStyle(DS.Colors.subtext)
-                .frame(maxWidth: .infinity, alignment: .center)
+        if data.isEmpty || data.allSatisfy({ $0.income == 0 && $0.expense == 0 }) {
+            emptyChartView
         } else {
-            Chart(data) { item in
-                BarMark(
-                    x: .value("Month", item.month),
-                    y: .value("Income", Double(item.income) / 100.0)
-                )
-                .foregroundStyle(.green)
-                .position(by: .value("Type", "Income"))
-                
-                BarMark(
-                    x: .value("Month", item.month),
-                    y: .value("Expense", Double(item.expense) / 100.0)
-                )
-                .foregroundStyle(.red.opacity(0.7))
-                .position(by: .value("Type", "Expense"))
-            }
-            .chartYAxisLabel("€")
-            .chartXAxis {
-                AxisMarks(values: .automatic) { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                        .font(.system(size: 11))
+            VStack(spacing: 12) {
+                Chart(data) { item in
+                    BarMark(
+                        x: .value("Month", item.month),
+                        y: .value("Amount", Double(item.income) / 100.0)
+                    )
+                    .foregroundStyle(DS.Colors.positive.opacity(0.8))
+                    .cornerRadius(4)
+                    .position(by: .value("Type", "Income"))
+                    
+                    BarMark(
+                        x: .value("Month", item.month),
+                        y: .value("Amount", Double(item.expense) / 100.0)
+                    )
+                    .foregroundStyle(DS.Colors.danger.opacity(0.7))
+                    .cornerRadius(4)
+                    .position(by: .value("Type", "Expense"))
                 }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                        .font(.system(size: 11))
+                .chartStyle()
+                
+                // Inline legend
+                HStack(spacing: 20) {
+                    legendDot(color: DS.Colors.positive, label: "Income")
+                    legendDot(color: DS.Colors.danger, label: "Expense")
                 }
             }
         }
     }
-}
-
-struct IncomeExpenseData: Identifiable {
-    let id = UUID()
-    let month: String
-    let income: Int
-    let expense: Int
 }
 
 // MARK: - Monthly Comparison Chart
@@ -457,7 +371,7 @@ struct MonthlyComparisonChart: View {
             
             let budget = store.budget(for: date)
             let spent = store.spent(for: date)
-            let monthName = monthFormatter.string(from: date)
+            let monthName = shortMonth(date)
             
             result.append(MonthComparisonData(month: monthName, budget: budget, spent: spent))
         }
@@ -465,50 +379,60 @@ struct MonthlyComparisonChart: View {
         return result
     }
     
-    private var monthFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM"
-        return formatter
-    }
-    
     var body: some View {
-        if data.isEmpty {
-            Text("No data")
-                .foregroundStyle(DS.Colors.subtext)
-                .frame(maxWidth: .infinity, alignment: .center)
+        if data.isEmpty || data.allSatisfy({ $0.budget == 0 && $0.spent == 0 }) {
+            emptyChartView
         } else {
-            Chart(data) { item in
-                BarMark(
-                    x: .value("Month", item.month),
-                    y: .value("Budget", Double(item.budget) / 100.0)
-                )
-                .foregroundStyle(.blue.opacity(0.3))
-                .position(by: .value("Type", "Budget"))
-                
-                BarMark(
-                    x: .value("Month", item.month),
-                    y: .value("Spent", Double(item.spent) / 100.0)
-                )
-                .foregroundStyle(item.spent > item.budget ? Color.red : Color.green)
-                .position(by: .value("Type", "Spent"))
-            }
-            .chartYAxisLabel("€")
-            .chartXAxis {
-                AxisMarks(values: .automatic) { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                        .font(.system(size: 11))
+            VStack(spacing: 12) {
+                Chart(data) { item in
+                    BarMark(
+                        x: .value("Month", item.month),
+                        y: .value("Amount", Double(item.budget) / 100.0)
+                    )
+                    .foregroundStyle(DS.Colors.accent.opacity(0.3))
+                    .cornerRadius(4)
+                    .position(by: .value("Type", "Budget"))
+                    
+                    BarMark(
+                        x: .value("Month", item.month),
+                        y: .value("Amount", Double(item.spent) / 100.0)
+                    )
+                    .foregroundStyle(item.spent > item.budget ? DS.Colors.danger.opacity(0.8) : DS.Colors.positive.opacity(0.8))
+                    .cornerRadius(4)
+                    .position(by: .value("Type", "Spent"))
                 }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisGridLine()
-                    AxisValueLabel()
-                        .font(.system(size: 11))
+                .chartStyle()
+                
+                HStack(spacing: 20) {
+                    legendDot(color: DS.Colors.accent.opacity(0.5), label: "Budget")
+                    legendDot(color: DS.Colors.positive, label: "Under")
+                    legendDot(color: DS.Colors.danger, label: "Over")
                 }
             }
         }
     }
+}
+
+// MARK: - Data Models
+
+struct MonthData: Identifiable {
+    let id = UUID()
+    let month: String
+    let amount: Int
+    let date: Date
+}
+
+struct CategoryData: Identifiable {
+    let id = UUID()
+    let category: Category
+    let amount: Int
+}
+
+struct IncomeExpenseData: Identifiable {
+    let id = UUID()
+    let month: String
+    let income: Int
+    let expense: Int
 }
 
 struct MonthComparisonData: Identifiable {
@@ -516,4 +440,64 @@ struct MonthComparisonData: Identifiable {
     let month: String
     let budget: Int
     let spent: Int
+}
+
+// MARK: - Helpers
+
+private func shortMonth(_ date: Date) -> String {
+    let fmt = DateFormatter()
+    fmt.dateFormat = "MMM"
+    return fmt.string(from: date)
+}
+
+private var emptyChartView: some View {
+    VStack(spacing: 8) {
+        Image(systemName: "chart.bar")
+            .font(.system(size: 28))
+            .foregroundStyle(DS.Colors.subtext.opacity(0.3))
+        
+        Text("No data for this period")
+            .font(.system(size: 13, weight: .medium, design: .rounded))
+            .foregroundStyle(DS.Colors.subtext)
+    }
+    .frame(maxWidth: .infinity)
+    .frame(height: 120)
+}
+
+private func legendDot(color: Color, label: String) -> some View {
+    HStack(spacing: 6) {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+        
+        Text(label)
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(DS.Colors.subtext)
+    }
+}
+
+// MARK: - Chart Style Extension
+
+extension View {
+    func chartStyle() -> some View {
+        self
+            .chartXAxis {
+                AxisMarks(values: .automatic) { _ in
+                    AxisGridLine()
+                        .foregroundStyle(DS.Colors.grid.opacity(0.5))
+                    AxisValueLabel()
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(DS.Colors.subtext)
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine()
+                        .foregroundStyle(DS.Colors.grid.opacity(0.3))
+                    AxisValueLabel()
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(DS.Colors.subtext)
+                }
+            }
+    }
 }

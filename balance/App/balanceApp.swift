@@ -12,7 +12,6 @@ struct balanceApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .preferredColorScheme(.dark)
                 .environmentObject(supabaseManager)
                 .environmentObject(authManager)
         }

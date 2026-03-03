@@ -128,6 +128,7 @@ class SupabaseManager: ObservableObject {
         let budgets = try await loadBudgets(userId: userId)
         let categoryBudgets = try await loadCategoryBudgets(userId: userId)
         let customCategories = try await loadCustomCategories(userId: userId)
+        let recurringTransactions = try await loadRecurringTransactions(userId: userId)
         
         // Create new store with synced data
         var syncedStore = localStore
@@ -135,17 +136,16 @@ class SupabaseManager: ObservableObject {
         syncedStore.budgetsByMonth = budgets
         syncedStore.categoryBudgetsByMonth = categoryBudgets
         syncedStore.customCategoriesWithIcons = customCategories
+        syncedStore.recurringTransactions = recurringTransactions
         
-        // Sync customCategoryNames from customCategoriesWithIcons
-        let namesFromIcons = customCategories.map { $0.name }
-        let allNames = Set(syncedStore.customCategoryNames + namesFromIcons)
-        syncedStore.customCategoryNames = Array(allNames).sorted { $0.lowercased() < $1.lowercased() }
+        // ✅ Sync customCategoryNames from server (not merge with local)
+        syncedStore.customCategoryNames = customCategories.map { $0.name }.sorted { $0.lowercased() < $1.lowercased() }
         
         lastSyncTime = Date()
         lastSyncDate = Date()
         syncError = nil
         
-        print("✅ Store synced: \(transactions.count) transactions, \(customCategories.count) custom categories")
+        print("✅ Store synced: \(transactions.count) transactions, \(recurringTransactions.count) recurring, \(customCategories.count) custom categories")
         return syncedStore
     }
     
@@ -192,6 +192,9 @@ class SupabaseManager: ObservableObject {
         
         // 5. Save custom categories
         try await saveCustomCategories(store.customCategoriesWithIcons, userId: userId)
+        
+        // 6. Save recurring transactions
+        try await saveRecurringTransactions(store.recurringTransactions, userId: userId)
         
         lastSyncTime = Date()
         print("✅ Store saved")
@@ -469,6 +472,167 @@ class SupabaseManager: ObservableObject {
     }
 }
 
+// MARK: - Recurring Transactions
+extension SupabaseManager {
+    
+    func saveRecurringTransactions(_ recurring: [RecurringTransaction], userId: String) async throws {
+        let userIdLower = userId.lowercased()
+        let dateFormatter = ISO8601DateFormatter()
+        
+        print("💾 Saving \(recurring.count) recurring transactions...")
+        
+        // Get existing IDs from server
+        struct IdDTO: Codable { let id: String }
+        let existing: [IdDTO] = try await client.database
+            .from("recurring_transactions")
+            .select("id")
+            .eq("user_id", value: userIdLower)
+            .eq("is_deleted", value: false)
+            .execute()
+            .value
+        
+        let existingIds = Set(existing.map { $0.id.lowercased() })
+        let localIds = Set(recurring.map { $0.id.uuidString.lowercased() })
+        
+        // Mark deleted ones (exist on server but not locally)
+        let deletedIds = existingIds.subtracting(localIds)
+        for deletedId in deletedIds {
+            try await client.database
+                .from("recurring_transactions")
+                .update(["is_deleted": "true"])
+                .eq("id", value: deletedId)
+                .execute()
+        }
+        
+        // Upsert all local recurring
+        for item in recurring {
+            var data: [String: String] = [
+                "id": item.id.uuidString.lowercased(),
+                "user_id": userIdLower,
+                "name": item.name,
+                "amount": String(item.amount),
+                "category": item.category.storageKey,
+                "frequency": item.frequency.rawValue,
+                "start_date": dateFormatter.string(from: item.startDate),
+                "is_active": item.isActive ? "true" : "false",
+                "payment_method": item.paymentMethod.rawValue,
+                "note": item.note,
+                "is_deleted": "false"
+            ]
+            
+            if let endDate = item.endDate {
+                data["end_date"] = dateFormatter.string(from: endDate)
+            }
+            
+            if let lastProcessed = item.lastProcessedDate {
+                data["last_processed_date"] = dateFormatter.string(from: lastProcessed)
+            }
+            
+            try await client.database
+                .from("recurring_transactions")
+                .upsert(data)
+                .execute()
+        }
+        
+        print("✅ Recurring transactions saved (\(recurring.count) upserted, \(deletedIds.count) deleted)")
+    }
+    
+    func loadRecurringTransactions(userId: String) async throws -> [RecurringTransaction] {
+        let userIdLower = userId.lowercased()
+        
+        struct RecurringDTO: Codable {
+            let id: String
+            let name: String
+            let amount: Int
+            let category: String
+            let frequency: String
+            let start_date: String
+            let end_date: String?
+            let is_active: Bool
+            let last_processed_date: String?
+            let payment_method: String?
+            let note: String?
+        }
+        
+        print("📥 Loading recurring transactions...")
+        
+        let response: [RecurringDTO] = try await client.database
+            .from("recurring_transactions")
+            .select()
+            .eq("user_id", value: userIdLower)
+            .eq("is_deleted", value: false)
+            .execute()
+            .value
+        
+        let isoFormatter = ISO8601DateFormatter()
+        let simpleFormatter = DateFormatter()
+        simpleFormatter.dateFormat = "yyyy-MM-dd"
+        simpleFormatter.locale = Locale(identifier: "en_US_POSIX")
+        simpleFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        
+        func parseDate(_ str: String) -> Date? {
+            isoFormatter.date(from: str) ?? simpleFormatter.date(from: str)
+        }
+        
+        func parseCategory(_ key: String) -> Category {
+            if key.hasPrefix("custom:") {
+                return .custom(String(key.dropFirst(7)))
+            }
+            switch key {
+            case "groceries": return .groceries
+            case "rent": return .rent
+            case "bills": return .bills
+            case "transport": return .transport
+            case "health": return .health
+            case "education": return .education
+            case "dining": return .dining
+            case "shopping": return .shopping
+            default: return .other
+            }
+        }
+        
+        func parseFrequency(_ raw: String) -> RecurringFrequency {
+            switch raw {
+            case "daily": return .daily
+            case "weekly": return .weekly
+            case "monthly": return .monthly
+            case "yearly": return .yearly
+            default: return .monthly
+            }
+        }
+        
+        func parsePaymentMethod(_ raw: String?) -> PaymentMethod {
+            guard let raw = raw else { return .card }
+            return PaymentMethod(rawValue: raw) ?? .card
+        }
+        
+        let results = response.compactMap { dto -> RecurringTransaction? in
+            guard let uuid = UUID(uuidString: dto.id),
+                  let startDate = parseDate(dto.start_date) else {
+                print("❌ Failed to parse recurring: \(dto.id)")
+                return nil
+            }
+            
+            return RecurringTransaction(
+                id: uuid,
+                name: dto.name,
+                amount: dto.amount,
+                category: parseCategory(dto.category),
+                frequency: parseFrequency(dto.frequency),
+                startDate: startDate,
+                endDate: dto.end_date.flatMap { parseDate($0) },
+                isActive: dto.is_active,
+                lastProcessedDate: dto.last_processed_date.flatMap { parseDate($0) },
+                paymentMethod: parsePaymentMethod(dto.payment_method),
+                note: dto.note ?? ""
+            )
+        }
+        
+        print("✅ Loaded \(results.count) recurring transactions")
+        return results
+    }
+}
+
 // MARK: - Custom Categories
 extension SupabaseManager {
     
@@ -557,13 +721,25 @@ extension SupabaseManager {
                         return categories
                     }
                 }
-            } catch {
-                print("❌ String format also failed: \(error)")
-                throw error
+            } catch let stringError {
+                print("❌ String format also failed: \(stringError)")
+                
+                // ✅ Auto-reset to fix corrupted format
+                print("🔧 Auto-resetting custom_categories...")
+                do {
+                    try await client
+                        .from("users")
+                        .update(["custom_categories": "[]"])
+                        .eq("id", value: userId)
+                        .execute()
+                    print("✅ Reset complete")
+                } catch {
+                    print("❌ Reset failed: \(error)")
+                }
             }
         }
         
-        print("⚠️ No custom categories found")
+        print("✅ Returning empty array")
         return []
     }
 }
