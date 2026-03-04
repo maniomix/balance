@@ -4,6 +4,7 @@ import Supabase
 // MARK: - Sync Status View
 
 struct SyncStatusView: View {
+    @Binding var store: Store
     @EnvironmentObject private var supabase: SupabaseManager
     @EnvironmentObject private var authManager: AuthManager
     
@@ -262,13 +263,22 @@ struct SyncStatusView: View {
                     await MainActor.run { resetState() }
                     return
                 }
-                let store = Store.load(userId: userId)
+                
+                // ✅ Use live store from binding (not stale Store.load)
+                print("📥 Manual sync: pulling from cloud...")
                 let syncedStore = try await supabase.syncStore(store)
+                
                 await MainActor.run {
-                    syncedStore.save(userId: userId)
+                    // ✅ Update the live binding — UI refreshes immediately
+                    store = syncedStore
+                    store.save(userId: userId)
                     onSyncComplete()
                 }
+                
+                print("✅ Manual sync completed! \(syncedStore.transactions.count) transactions")
+                
             } catch {
+                print("❌ Manual sync failed: \(error)")
                 await MainActor.run {
                     resetState()
                     Haptics.error()

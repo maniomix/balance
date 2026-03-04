@@ -142,12 +142,9 @@ struct ContentView: View {
         print("=================================================")
         
         do {
-            // First, upload current state to cloud
-            print("📤 Uploading current data to cloud...")
-            try await supabaseManager.saveStore(store)
-            print("✅ Upload successful!")
-            
-            // Then sync back (to get any changes from other devices)
+            // ✅ Pull from cloud (server is source of truth)
+            // Local changes are auto-pushed after each edit.
+            // Pushing stale local data here would overwrite deletions from other devices.
             print("📥 Syncing from cloud...")
             let cloudStore = try await supabaseManager.syncStore(store)
             store = cloudStore
@@ -902,7 +899,7 @@ private struct DashboardView: View {
                 
                 // 🔄 Sync Status (وسط)
                 ToolbarItem(placement: .principal) {
-                    SyncStatusView()
+                    SyncStatusView(store: $store)
                 }
 
                 // ➕ دکمه اضافه کردن (سمت راست – همونی که داشتی)
@@ -933,15 +930,20 @@ private struct DashboardView: View {
         }
         .alert("Delete This Month", isPresented: $showDeleteMonthConfirm) {
             Button("Delete", role: .destructive) {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-                    store.clearMonthData(for: store.selectedMonth)
-                }
+                let monthToDelete = store.selectedMonth
                 
-                // Save
+                // 1. Clear locally
+                store.clearMonthData(for: monthToDelete)
+                
+                // 2. Save locally + to cloud
                 if let userId = authManager.currentUser?.uid {
                     store.save(userId: userId)
-                    Task { try? await Task.sleep(nanoseconds: 100_000_000);
-                        try? await supabaseManager.saveStore(store)
+                    
+                    // Capture the cleared store for the async task
+                    let clearedStore = store
+                    Task {
+                        try? await supabaseManager.saveStore(clearedStore)
+                        print("✅ Month \(Store.monthKey(monthToDelete)) deleted from cloud")
                     }
                 }
                 Haptics.success()
@@ -3145,7 +3147,6 @@ private struct InsightsView: View {
     @State private var notifDetail: String? = nil
     
     @State private var shareURL: URL? = nil
-    @State private var showShareSheet: Bool = false
 
     private struct TrendPoint: Identifiable {
         let id: Int          // day of month
@@ -3628,11 +3629,9 @@ private struct InsightsView: View {
                 Task { await Notifications.evaluateSmartRules(store: store) }
             }
             
-            .sheet(isPresented: $showShareSheet) {
-                if let shareURL {
-                    ShareSheet(items: [shareURL])
-                        .ignoresSafeArea()
-                }
+            .sheet(item: $shareURL) { url in
+                ShareSheet(items: [url])
+                    .ignoresSafeArea()
             }
             .sheet(isPresented: $showAdvancedCharts) {
                 AdvancedChartsView(store: $store)
@@ -3791,9 +3790,8 @@ private struct InsightsView: View {
             }
 
             try data.write(to: url, options: .atomic)
-            Haptics.exportSuccess()  // ← هاپتیک export
+            Haptics.exportSuccess()
             self.shareURL = url
-            self.showShareSheet = true
         } catch {
             Haptics.error()  // ← هاپتیک خطا
             self.notifDetail = "Export failed: \(error.localizedDescription)"
@@ -5392,12 +5390,24 @@ private struct TransactionRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
-                Circle()
-                    .fill(t.category.tint.opacity(0.18))
-                    .frame(width: 36, height: 36)
-                    .overlay(
-                        categoryIcon
-                    )
+                if t.type == .income {
+                    // ✅ Income: green arrow down
+                    Circle()
+                        .fill(Color.green.opacity(0.18))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Image(systemName: "arrow.down.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.system(size: 16, weight: .semibold))
+                        )
+                } else {
+                    Circle()
+                        .fill(t.category.tint.opacity(0.18))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            categoryIcon
+                        )
+                }
 
                 // 📎 Badge اگر attachment وجود دارد
                 if t.attachmentData != nil || t.attachmentType != nil {
@@ -5419,9 +5429,9 @@ private struct TransactionRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(t.category.title)
+                    Text(t.type == .income ? "Income" : t.category.title)
                         .font(DS.Typography.body)
-                        .foregroundStyle(DS.Colors.text)
+                        .foregroundStyle(t.type == .income ? .green : DS.Colors.text)
 
                     // آیکون روش پرداخت (کوچک)
                     Image(systemName: t.paymentMethod.icon)
@@ -6069,6 +6079,9 @@ private struct TransactionFormCard: View {
                     Button {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                             transactionType = .expense
+                            if note == "Income" {
+                                note = ""
+                            }
                         }
                         Haptics.selection()
                     } label: {
@@ -6092,6 +6105,10 @@ private struct TransactionFormCard: View {
                     Button {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                             transactionType = .income
+                            category = .other  // Income doesn't need category
+                            if note.isEmpty {
+                                note = "Income"
+                            }
                         }
                         Haptics.selection()
                     } label: {
@@ -6139,11 +6156,13 @@ private struct TransactionFormCard: View {
 
                 Divider().overlay(DS.Colors.grid)
 
-                Text("Category")
-                    .font(DS.Typography.caption)
-                    .foregroundStyle(DS.Colors.subtext)
+                // Category — only show for expenses
+                if transactionType == .expense {
+                    Text("Category")
+                        .font(DS.Typography.caption)
+                        .foregroundStyle(DS.Colors.subtext)
 
-                ScrollView(.horizontal, showsIndicators: false) {
+                    ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(store.allCategories, id: \.self) { c in
                             Button { category = c } label: {
@@ -6226,6 +6245,7 @@ private struct TransactionFormCard: View {
                         .buttonStyle(.plain)
                     }
                 }
+                } // end if expense (category)
 
                 Divider().overlay(DS.Colors.grid)
 
@@ -6246,7 +6266,7 @@ private struct TransactionFormCard: View {
                     .font(DS.Typography.caption)
                     .foregroundStyle(DS.Colors.subtext)
 
-                TextField("e.g. groceries", text: $note)
+                TextField(transactionType == .income ? "e.g. Salary" : "e.g. groceries", text: $note)
                     .font(DS.Typography.body)
                     .padding(12)
                     .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -7861,6 +7881,17 @@ struct Store: Hashable, Codable {
         let key = Self.monthKey(month)
         let cal = Calendar.current
 
+        // ✅ Track deleted IDs before removing — so cloud sync marks them as deleted
+        let monthTxIds = transactions
+            .filter { cal.isDate($0.date, equalTo: month, toGranularity: .month) }
+            .map { $0.id.uuidString }
+        
+        for id in monthTxIds {
+            if !deletedTransactionIds.contains(id) {
+                deletedTransactionIds.append(id)
+            }
+        }
+
         // حذف تمام تراکنش‌های ماه
         transactions.removeAll {
             cal.isDate($0.date, equalTo: month, toGranularity: .month)
@@ -9305,6 +9336,10 @@ private static func zipXLSX(entries: [(String, Data)]) -> Data {
 }
 
 
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
 
 private struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]

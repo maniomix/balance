@@ -157,12 +157,12 @@ class SupabaseManager: ObservableObject {
         
         print("💾 Saving store...")
         
-        // 1. Mark deleted transactions as deleted in Supabase
+        // 1. Hard delete removed transactions from Supabase
         for deletedId in store.deletedTransactionIds {
             if let uuid = UUID(uuidString: deletedId) {
                 do {
                     try await deleteTransaction(uuid)
-                    print("🗑️ Marked transaction as deleted: \(deletedId)")
+                    print("🗑️ Deleted transaction: \(deletedId)")
                 } catch {
                     print("❌ Failed to delete transaction \(deletedId): \(error)")
                 }
@@ -174,19 +174,75 @@ class SupabaseManager: ObservableObject {
             try await saveTransaction(transaction, userId: userId)
         }
         
-        // 3. Save budgets
+        // 3. Save budgets + delete removed months from server
+        let localBudgetMonths = Set(store.budgetsByMonth.keys)
+        
+        // Load server budget months
+        struct BudgetMonthDTO: Codable { let month: String }
+        let serverBudgets: [BudgetMonthDTO] = try await client.database
+            .from("budgets")
+            .select("month")
+            .eq("user_id", value: userId.lowercased())
+            .execute()
+            .value
+        
+        // Delete budgets that exist on server but not locally
+        for sb in serverBudgets {
+            if !localBudgetMonths.contains(sb.month) {
+                print("🗑️ Deleting budget for month \(sb.month) from server")
+                try await client.database
+                    .from("budgets")
+                    .delete()
+                    .eq("user_id", value: userId.lowercased())
+                    .eq("month", value: sb.month)
+                    .execute()
+                
+                // Also delete all category budgets for that month
+                print("🗑️ Deleting category budgets for month \(sb.month) from server")
+                try await client.database
+                    .from("category_budgets")
+                    .delete()
+                    .eq("user_id", value: userId.lowercased())
+                    .eq("month", value: sb.month)
+                    .execute()
+            }
+        }
+        
         for (monthKey, amount) in store.budgetsByMonth {
             if let month = monthKeyToDate(monthKey) {
                 try await saveBudget(userId: userId, month: month, amount: amount)
             }
         }
         
-        // 4. Save category budgets
+        // 4. Save category budgets + clean removed ones
+        let localCatBudgetMonths = Set(store.categoryBudgetsByMonth.keys)
+        
         for (monthKey, categoriesDict) in store.categoryBudgetsByMonth {
             if let month = monthKeyToDate(monthKey) {
                 for (categoryKey, amount) in categoriesDict {
                     try await saveCategoryBudget(userId: userId, month: month, category: categoryKey, amount: amount)
                 }
+            }
+        }
+        
+        // Delete category budgets for months not in local
+        struct CatBudgetMonthDTO: Codable { let month: String }
+        let serverCatBudgets: [CatBudgetMonthDTO] = try await client.database
+            .from("category_budgets")
+            .select("month")
+            .eq("user_id", value: userId.lowercased())
+            .execute()
+            .value
+        
+        let serverCatMonths = Set(serverCatBudgets.map { $0.month })
+        for month in serverCatMonths {
+            if !localCatBudgetMonths.contains(month) {
+                try await client.database
+                    .from("category_budgets")
+                    .delete()
+                    .eq("user_id", value: userId.lowercased())
+                    .eq("month", value: month)
+                    .execute()
             }
         }
         
@@ -212,8 +268,7 @@ class SupabaseManager: ObservableObject {
             "category": transaction.category.storageKey,
             "type": transaction.type == .income ? "income" : "expense",
             "note": transaction.note,
-            "date": dateFormatter.string(from: transaction.date),
-            "is_deleted": "false"
+            "date": dateFormatter.string(from: transaction.date)
         ]
         
         try await client.database
@@ -241,7 +296,6 @@ class SupabaseManager: ObservableObject {
             .from("transactions")
             .select()
             .eq("user_id", value: userIdLowercase)
-            .eq("is_deleted", value: false)
             .order("date", ascending: false)
             .execute()
             .value
@@ -327,7 +381,7 @@ class SupabaseManager: ObservableObject {
     func deleteTransaction(_ transactionId: UUID) async throws {
         try await client.database
             .from("transactions")
-            .update(["is_deleted": "true"])
+            .delete()
             .eq("id", value: transactionId.uuidString.lowercased())
             .execute()
     }
@@ -487,19 +541,18 @@ extension SupabaseManager {
             .from("recurring_transactions")
             .select("id")
             .eq("user_id", value: userIdLower)
-            .eq("is_deleted", value: false)
             .execute()
             .value
         
         let existingIds = Set(existing.map { $0.id.lowercased() })
         let localIds = Set(recurring.map { $0.id.uuidString.lowercased() })
         
-        // Mark deleted ones (exist on server but not locally)
+        // Hard delete ones that exist on server but not locally
         let deletedIds = existingIds.subtracting(localIds)
         for deletedId in deletedIds {
             try await client.database
                 .from("recurring_transactions")
-                .update(["is_deleted": "true"])
+                .delete()
                 .eq("id", value: deletedId)
                 .execute()
         }
@@ -516,8 +569,7 @@ extension SupabaseManager {
                 "start_date": dateFormatter.string(from: item.startDate),
                 "is_active": item.isActive ? "true" : "false",
                 "payment_method": item.paymentMethod.rawValue,
-                "note": item.note,
-                "is_deleted": "false"
+                "note": item.note
             ]
             
             if let endDate = item.endDate {
@@ -560,7 +612,6 @@ extension SupabaseManager {
             .from("recurring_transactions")
             .select()
             .eq("user_id", value: userIdLower)
-            .eq("is_deleted", value: false)
             .execute()
             .value
         
