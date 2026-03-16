@@ -5,9 +5,9 @@ import SwiftUI
 /// Compact goals summary card for the main Dashboard.
 /// Shows top active goals with progress. Taps into full GoalsOverviewView.
 struct GoalsDashboardCard: View {
-    
+
     @StateObject private var goalManager = GoalManager.shared
-    
+
     var body: some View {
         if !goalManager.goals.isEmpty {
             NavigationLink(destination: GoalsOverviewView()) {
@@ -23,48 +23,74 @@ struct GoalsDashboardCard: View {
                                     .font(DS.Typography.caption)
                                     .foregroundStyle(DS.Colors.subtext)
                             }
-                            
+
                             Spacer()
-                            
-                            Text("\(goalManager.activeGoals.count) active")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(DS.Colors.subtext)
-                            
+
+                            // Overall progress
+                            Text("\(Int(goalManager.overallProgress * 100))%")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(DS.Colors.accent)
+
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(DS.Colors.subtext.opacity(0.4))
                         }
-                        
+
+                        // Total saved / target
+                        HStack(spacing: 4) {
+                            Text(DS.Format.money(goalManager.totalSaved))
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundStyle(DS.Colors.text)
+                            Text("/ \(DS.Format.money(goalManager.totalTarget))")
+                                .font(.system(size: 12))
+                                .foregroundStyle(DS.Colors.subtext)
+                        }
+
+                        // Overall progress bar
+                        GoalProgressBar(progress: goalManager.overallProgress, height: 4)
+
                         // Top 3 goals
-                        ForEach(goalManager.activeGoals.prefix(3)) { goal in
+                        ForEach(goalManager.goalsByPriority.prefix(3)) { goal in
                             HStack(spacing: 10) {
                                 Image(systemName: goal.icon)
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(DS.Colors.accent)
+                                    .foregroundStyle(GoalColorHelper.color(for: goal.colorToken))
                                     .frame(width: 24, height: 24)
-                                    .background(DS.Colors.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                
+                                    .background(GoalColorHelper.color(for: goal.colorToken).opacity(0.1), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack {
                                         Text(goal.name)
                                             .font(.system(size: 13, weight: .medium))
                                             .foregroundStyle(DS.Colors.text)
                                             .lineLimit(1)
-                                        
+
                                         Spacer()
-                                        
+
                                         Text("\(goal.progressPercent)%")
                                             .font(.system(size: 11, weight: .semibold, design: .rounded))
-                                            .foregroundStyle(DS.Colors.accent)
+                                            .foregroundStyle(GoalColorHelper.color(for: goal.colorToken))
                                     }
-                                    
-                                    GoalProgressBar(progress: goal.progress, height: 3)
+
+                                    GoalProgressBar(progress: goal.progress, height: 3, tintColor: GoalColorHelper.color(for: goal.colorToken))
                                 }
                             }
                         }
-                        
+
+                        // Behind schedule warning
+                        if !goalManager.behindGoals.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 10))
+                                Text("\(goalManager.behindGoals.count) behind schedule")
+                                    .font(.system(size: 10))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(DS.Colors.warning)
+                            .padding(.top, 2)
+                        }
                         // Upcoming deadline warning
-                        if let next = goalManager.upcomingDeadlines.first,
+                        else if let next = goalManager.upcomingDeadlines.first,
                            let date = next.targetDate {
                             HStack(spacing: 4) {
                                 Image(systemName: "clock")

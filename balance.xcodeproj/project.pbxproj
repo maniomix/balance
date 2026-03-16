@@ -333,7 +333,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				GENERATE_PKGINFO_FILE = NO;
 				INFOPLIST_FILE = balance/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Balance;
+				INFOPLIST_KEY_CFBundleDisplayName = CENTMOND;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to scan receipts.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Adding FaceID for more protection when loginto the app.";
@@ -379,7 +379,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				GENERATE_PKGINFO_FILE = NO;
 				INFOPLIST_FILE = balance/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Balance;
+				INFOPLIST_KEY_CFBundleDisplayName = CENTMOND;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to scan receipts.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Adding FaceID for more protection when loginto the app.";

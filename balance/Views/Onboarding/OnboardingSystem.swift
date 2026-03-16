@@ -293,7 +293,7 @@ struct WelcomeView: View {
                 .foregroundColor(.blue)
             
             VStack(spacing: 12) {
-                Text("Welcome to Balance!")
+                Text("Welcome to Centmond!")
                     .font(.system(size: 32, weight: .bold))
                 
                 Text("Take control of your finances")
@@ -334,3 +334,4 @@ struct WelcomeView: View {
 #Preview {
     TutorialCardView()
 }
+

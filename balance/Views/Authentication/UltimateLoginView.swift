@@ -77,8 +77,8 @@ struct UltimateLoginView: View {
                     .foregroundStyle(Color(uiColor: .label))
             }
             
-            Text("Balance")
-                .font(.system(size: 32, weight: .bold, design: .rounded))
+            Text("CENTMOND")
+                .font(.custom("Pacifico-Regular", size: 30))
                 .foregroundStyle(Color(uiColor: .label))
             
             Text("Welcome back")

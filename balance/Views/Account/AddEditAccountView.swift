@@ -173,7 +173,8 @@ struct AddEditAccountView: View {
     }
     
     private func saveAccount() async {
-        guard let userId = AuthManager.shared.currentUser?.uid else { return }
+        guard let uidString = AuthManager.shared.currentUser?.uid,
+              let userId = UUID(uuidString: uidString) else { return }
         isSaving = true
         
         let balanceValue = Double(balance) ?? 0

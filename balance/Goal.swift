@@ -167,7 +167,7 @@ struct Goal: Identifiable, Codable, Hashable {
     
     enum TrackingStatus {
         case ahead, onTrack, behind, completed, noTarget
-        
+
         var label: String {
             switch self {
             case .ahead: return "Ahead"
@@ -177,6 +177,33 @@ struct Goal: Identifiable, Codable, Hashable {
             case .noTarget: return "No deadline"
             }
         }
+
+        var icon: String {
+            switch self {
+            case .ahead: return "arrow.up.right"
+            case .onTrack: return "checkmark.circle"
+            case .behind: return "exclamationmark.triangle"
+            case .completed: return "checkmark.circle.fill"
+            case .noTarget: return "clock"
+            }
+        }
+    }
+
+    /// Days until target date (nil if no target)
+    var daysRemaining: Int? {
+        guard let target = targetDate else { return nil }
+        return Calendar.current.dateComponents([.day], from: Date(), to: target).day
+    }
+
+    /// Required weekly saving to hit target date
+    var requiredWeeklySaving: Int? {
+        guard let target = targetDate else { return nil }
+        let remaining = remainingAmount
+        guard remaining > 0 else { return 0 }
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: target).day ?? 0
+        guard days > 0 else { return remaining }
+        let weeks = max(1, days / 7)
+        return remaining / weeks
     }
 }
 

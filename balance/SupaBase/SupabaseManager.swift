@@ -485,12 +485,21 @@ class SupabaseManager: ObservableObject {
         guard let userId = currentUser?.id.uuidString else { return }
         
         do {
-            var data: [String: String] = [
-                "user_id": userId.lowercased(),
-                "event_name": name
-            ]
+            // Convert properties to JSON string
+            var propsJson = "{}"
+            if let properties = properties {
+                let stringProps = properties.mapValues { "\($0)" }
+                if let jsonData = try? JSONSerialization.data(withJSONObject: stringProps),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    propsJson = jsonString
+                }
+            }
             
-            // Skip properties for now - need proper JSON encoding
+            let data: [String: String] = [
+                "user_id": userId.lowercased(),
+                "event_name": name,
+                "event_properties": propsJson
+            ]
             
             try await client.database
                 .from("events")
@@ -509,6 +518,50 @@ class SupabaseManager: ObservableObject {
             .update(["last_active_at": ISO8601DateFormatter().string(from: Date())])
             .eq("id", value: userId)
             .execute()
+    }
+    
+    // MARK: - Delete Month Data
+    
+    /// حذف کامل داده‌های یک ماه از Supabase
+    /// شامل: transactions, budgets, category_budgets
+    func deleteMonthData(userId: String, monthKey: String) async throws {
+        let userIdLower = userId.lowercased()
+        
+        print("🗑️ Deleting month \(monthKey) from Supabase...")
+        
+        // 1. حذف تراکنش‌های این ماه
+        // date ها به فرمت ISO8601 هستن: "2026-03-15T..." پس با like فیلتر میکنیم
+        // هم فرمت ISO8601 و هم YYYY-MM-DD رو ساپورت میکنه
+        try await client.database
+            .from("transactions")
+            .delete()
+            .eq("user_id", value: userIdLower)
+            .like("date", pattern: "\(monthKey)%")
+            .execute()
+        
+        print("  ✅ Deleted transactions for \(monthKey)")
+        
+        // 2. حذف بودجه کل این ماه
+        try await client.database
+            .from("budgets")
+            .delete()
+            .eq("user_id", value: userIdLower)
+            .eq("month", value: monthKey)
+            .execute()
+        
+        print("  ✅ Deleted budget for \(monthKey)")
+        
+        // 3. حذف category budgets این ماه
+        try await client.database
+            .from("category_budgets")
+            .delete()
+            .eq("user_id", value: userIdLower)
+            .eq("month", value: monthKey)
+            .execute()
+        
+        print("  ✅ Deleted category budgets for \(monthKey)")
+        
+        print("🗑️ Month \(monthKey) fully deleted from Supabase")
     }
     
     // MARK: - Helpers

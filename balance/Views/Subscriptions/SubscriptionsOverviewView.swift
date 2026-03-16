@@ -1,0 +1,441 @@
+import SwiftUI
+
+// ============================================================
+// MARK: - Subscriptions Overview
+// ============================================================
+
+struct SubscriptionsOverviewView: View {
+    @StateObject private var engine = SubscriptionEngine.shared
+    @State private var filterStatus: SubscriptionStatus? = nil
+    @State private var sortOption: SortOption = .cost
+
+    enum SortOption: String, CaseIterable {
+        case cost = "Cost"
+        case renewal = "Renewal"
+        case name = "Name"
+    }
+
+    private var filtered: [DetectedSubscription] {
+        var list = engine.subscriptions
+        if let status = filterStatus {
+            list = list.filter { $0.status == status }
+        }
+        switch sortOption {
+        case .cost:
+            list.sort { $0.monthlyCost > $1.monthlyCost }
+        case .renewal:
+            list.sort { ($0.nextRenewalDate ?? .distantFuture) < ($1.nextRenewalDate ?? .distantFuture) }
+        case .name:
+            list.sort { $0.merchantName.localizedCaseInsensitiveCompare($1.merchantName) == .orderedAscending }
+        }
+        return list
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                DS.Colors.bg.ignoresSafeArea()
+
+                if engine.subscriptions.isEmpty && !engine.isLoading {
+                    emptyState
+                } else {
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            summaryCard
+                            insightBanners
+                            filterBar
+                            renewalCalendarSection
+                            subscriptionsList
+                        }
+                        .padding(.vertical)
+                    }
+                }
+
+                if engine.isLoading {
+                    ProgressView()
+                        .tint(DS.Colors.accent)
+                }
+            }
+            .navigationTitle("Subscriptions")
+            .navigationBarTitleDisplayMode(.large)
+        }
+    }
+
+    // MARK: - Summary Card
+
+    private var summaryCard: some View {
+        DS.Card {
+            VStack(spacing: 14) {
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Monthly Cost")
+                            .font(DS.Typography.caption)
+                            .foregroundStyle(DS.Colors.subtext)
+
+                        Text("€\(DS.Format.currency(engine.monthlyTotal))")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(DS.Colors.text)
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("Yearly Cost")
+                            .font(DS.Typography.caption)
+                            .foregroundStyle(DS.Colors.subtext)
+
+                        Text("€\(DS.Format.currency(engine.yearlyTotal))")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DS.Colors.subtext)
+                    }
+                }
+
+                // Status pills
+                HStack(spacing: 10) {
+                    statusPill(
+                        count: engine.subscriptions.filter { $0.status == .active }.count,
+                        label: "Active",
+                        color: DS.Colors.positive
+                    )
+                    statusPill(
+                        count: engine.subscriptions.filter { $0.status == .paused }.count,
+                        label: "Paused",
+                        color: DS.Colors.warning
+                    )
+                    statusPill(
+                        count: engine.subscriptions.filter { $0.status == .suspectedUnused }.count,
+                        label: "Unused?",
+                        color: Color(hexValue: 0x9B59B6)
+                    )
+                    statusPill(
+                        count: engine.subscriptions.filter { $0.status == .cancelled }.count,
+                        label: "Cancelled",
+                        color: DS.Colors.subtext
+                    )
+
+                    Spacer()
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func statusPill(count: Int, label: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text("\(count)")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(count > 0 ? color : DS.Colors.subtext.opacity(0.5))
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(DS.Colors.subtext)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            (count > 0 ? color : DS.Colors.subtext).opacity(0.08),
+            in: Capsule()
+        )
+    }
+
+    // MARK: - Insight Banners
+
+    @ViewBuilder
+    private var insightBanners: some View {
+        if !engine.insights.isEmpty {
+            VStack(spacing: 8) {
+                ForEach(engine.insights) { insight in
+                    HStack(spacing: 10) {
+                        Image(systemName: insight.icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(insight.color)
+
+                        Text(insight.displayName)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DS.Colors.text)
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(DS.Colors.subtext)
+                    }
+                    .padding(12)
+                    .background(
+                        insight.color.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(insight.color.opacity(0.2), lineWidth: 1)
+                    )
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    // MARK: - Filter Bar
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                filterChip(label: "All", isSelected: filterStatus == nil) {
+                    withAnimation(.spring(response: 0.3)) { filterStatus = nil }
+                }
+                ForEach(SubscriptionStatus.allCases) { status in
+                    filterChip(label: status.displayName, isSelected: filterStatus == status) {
+                        withAnimation(.spring(response: 0.3)) {
+                            filterStatus = filterStatus == status ? nil : status
+                        }
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                // Sort menu
+                Menu {
+                    ForEach(SortOption.allCases, id: \.self) { option in
+                        Button {
+                            sortOption = option
+                        } label: {
+                            if sortOption == option {
+                                Label(option.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(option.rawValue)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DS.Colors.accent)
+                        .frame(width: 32, height: 32)
+                        .background(DS.Colors.accent.opacity(0.1), in: Circle())
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private func filterChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(isSelected ? DS.Colors.text : DS.Colors.subtext)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    isSelected ? DS.Colors.accent.opacity(0.15) : DS.Colors.surface2,
+                    in: Capsule()
+                )
+                .overlay(
+                    Capsule().stroke(
+                        isSelected ? DS.Colors.accent.opacity(0.3) : DS.Colors.grid.opacity(0.5),
+                        lineWidth: 1
+                    )
+                )
+        }
+    }
+
+    // MARK: - Renewal Calendar
+
+    @ViewBuilder
+    private var renewalCalendarSection: some View {
+        let upcoming = engine.upcomingRenewals.prefix(5)
+        if !upcoming.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Upcoming Renewals")
+                    .font(DS.Typography.section)
+                    .foregroundStyle(DS.Colors.text)
+                    .padding(.horizontal)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(Array(upcoming)) { sub in
+                            NavigationLink(destination: SubscriptionDetailView(subscription: sub)) {
+                                renewalCard(sub)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+
+    private func renewalCard(_ sub: DetectedSubscription) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: sub.category.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(sub.category.tint)
+
+                Text(sub.merchantName.capitalized)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DS.Colors.text)
+                    .lineLimit(1)
+            }
+
+            Text("€\(DS.Format.currency(sub.expectedAmount))")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(DS.Colors.text)
+
+            if let days = sub.daysUntilRenewal {
+                Text(days == 0 ? "Today" : days == 1 ? "Tomorrow" : "In \(days) days")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(days <= 3 ? DS.Colors.warning : DS.Colors.subtext)
+            }
+        }
+        .frame(width: 140, alignment: .leading)
+        .padding(12)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(DS.Colors.grid, lineWidth: 1)
+        )
+    }
+
+    // MARK: - Subscriptions List
+
+    private var subscriptionsList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("All Subscriptions (\(filtered.count))")
+                .font(DS.Typography.section)
+                .foregroundStyle(DS.Colors.text)
+                .padding(.horizontal)
+
+            ForEach(filtered) { sub in
+                NavigationLink(destination: SubscriptionDetailView(subscription: sub)) {
+                    subscriptionRow(sub)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func subscriptionRow(_ sub: DetectedSubscription) -> some View {
+        DS.Card {
+            HStack(spacing: 14) {
+                // Icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(sub.category.tint.opacity(0.12))
+                        .frame(width: 42, height: 42)
+
+                    Image(systemName: sub.category.icon)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(sub.category.tint)
+                }
+
+                // Info
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(sub.merchantName.capitalized)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DS.Colors.text)
+                            .lineLimit(1)
+
+                        // Status badge
+                        if sub.status != .active {
+                            Text(sub.status.displayName)
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .foregroundStyle(sub.status.color)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(sub.status.color.opacity(0.12), in: Capsule())
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        Text(sub.billingCycle.displayName)
+                            .font(.system(size: 12, weight: .medium))
+
+                        if let date = sub.nextRenewalDate {
+                            Text("·")
+                            Text(formatShortDate(date))
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                    }
+                    .foregroundStyle(DS.Colors.subtext)
+
+                    // Insight labels
+                    let insights = SubscriptionEngine.shared.insightsFor(sub)
+                    if !insights.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(insights.prefix(2)) { insight in
+                                HStack(spacing: 3) {
+                                    Image(systemName: insight.icon)
+                                        .font(.system(size: 8))
+                                    Text(insight.displayName)
+                                        .font(.system(size: 9, weight: .semibold))
+                                }
+                                .foregroundStyle(insight.color)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(insight.color.opacity(0.1), in: Capsule())
+                            }
+                        }
+                    }
+                }
+
+                Spacer()
+
+                // Amount
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("€\(DS.Format.currency(sub.expectedAmount))")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.Colors.text)
+
+                    Text("/\(sub.billingCycle == .yearly ? "yr" : sub.billingCycle == .weekly ? "wk" : "mo")")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DS.Colors.subtext)
+
+                    if sub.hasPriceIncrease, let change = sub.priceChangeAmount, change > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("€\(DS.Format.currency(change))")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(DS.Colors.danger)
+                    }
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Colors.subtext.opacity(0.5))
+            }
+        }
+        .padding(.horizontal)
+        .opacity(sub.status == .cancelled ? 0.5 : 1)
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "creditcard.and.123")
+                .font(.system(size: 48))
+                .foregroundStyle(DS.Colors.subtext.opacity(0.4))
+
+            Text("No Subscriptions Detected")
+                .font(DS.Typography.title)
+                .foregroundStyle(DS.Colors.text)
+
+            Text("Add more transactions and we'll automatically\ndetect your recurring subscriptions.")
+                .font(DS.Typography.body)
+                .foregroundStyle(DS.Colors.subtext)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, 40)
+    }
+
+    // MARK: - Helpers
+
+    private func formatShortDate(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMM d"
+        return fmt.string(from: date)
+    }
+}

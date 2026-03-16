@@ -1,7 +1,7 @@
 import SwiftUI
 import PhotosUI
 import Supabase
-
+// TEST COMMENT - Claude edit works ✅
 struct ProfileView: View {
     @Binding var store: Store
     @EnvironmentObject private var authManager: AuthManager
@@ -42,28 +42,27 @@ struct ProfileView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.bg.ignoresSafeArea()
-                
-                ScrollView {
-                    VStack(spacing: 20) {
-                        profileHeader
-                        statsRow
-                        accountInfoSection
-                        actionsSection
-                        signOutButton
-                        
-                        Spacer(minLength: 30)
-                    }
-                    .padding()
+        ZStack {
+            DS.Colors.bg.ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 20) {
+                    profileHeader
+                    statsRow
+                    subscriptionCard
+                    accountInfoSection
+                    actionsSection
+                    signOutButton
+
+                    Spacer(minLength: 30)
                 }
+                .padding()
             }
-            .navigationTitle("Profile")
-            .navigationBarTitleDisplayMode(.large)
-            .onAppear {
-                loadProfile()
-            }
+        }
+        .navigationTitle("Profile")
+        .navigationBarTitleDisplayMode(.large)
+        .onAppear {
+            loadProfile()
         }
     }
     
@@ -188,6 +187,174 @@ struct ProfileView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 0.8)
         )
+    }
+    
+    // MARK: - Subscription Status
+    
+    private var subscriptionCard: some View {
+        let manager = SubscriptionManager.shared
+        let isPro = manager.isPro
+        
+        let planLabel: String = {
+            switch manager.currentPlan {
+            case "monthly": return "Monthly"
+            case "yearly": return "Yearly"
+            default: return "Free"
+            }
+        }()
+        
+        let priceLabel: String = {
+            switch manager.currentPlan {
+            case "monthly": return "$4.99/mo"
+            case "yearly": return "$28.99/yr"
+            default: return "$0"
+            }
+        }()
+        
+        let renewalLabel: String = {
+            guard isPro, let end = manager.currentPeriodEnd else {
+                if manager.status == .trial, let trialEnd = manager.trialEndDate {
+                    let fmt = DateFormatter()
+                    fmt.dateFormat = "MMM d, yyyy"
+                    return "Trial ends \(fmt.string(from: trialEnd))"
+                }
+                return "No active plan"
+            }
+            let fmt = DateFormatter()
+            fmt.dateFormat = "MMM d, yyyy"
+            return "Renews \(fmt.string(from: end))"
+        }()
+        
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Subscription")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Colors.subtext)
+            
+            VStack(spacing: 0) {
+                // Top: Plan name + badge
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(isPro ? Color.white : Color.white.opacity(0.08))
+                            .frame(width: 44, height: 44)
+                        
+                        Image(systemName: isPro ? "crown.fill" : "lock.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(isPro ? .black : DS.Colors.subtext)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(isPro ? "Centmond Pro" : "Free Plan")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(DS.Colors.text)
+                        
+                        Text(planLabel)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(DS.Colors.subtext)
+                    }
+                    
+                    Spacer()
+                    
+                    Text(isPro ? "PRO" : "FREE")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(isPro ? .black : DS.Colors.subtext)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(isPro ? Color.white : Color.white.opacity(0.08))
+                        .clipShape(Capsule())
+                }
+                .padding(14)
+                
+                if isPro || manager.status == .trial {
+                    // Divider
+                    Rectangle()
+                        .fill(Color.white.opacity(0.08))
+                        .frame(height: 0.5)
+                        .padding(.horizontal, 14)
+                    
+                    // Bottom: Details
+                    HStack {
+                        // Renewal
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(manager.status == .trial ? "Trial" : "Renewal")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(DS.Colors.subtext)
+                            Text(renewalLabel)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(DS.Colors.text)
+                        }
+                        
+                        Spacer()
+                        
+                        // Price
+                        if manager.status == .active {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("Billed")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(DS.Colors.subtext)
+                                Text(priceLabel)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(DS.Colors.text)
+                            }
+                        }
+                        
+                        if manager.status == .trial {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("Days left")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(DS.Colors.subtext)
+                                Text("\(manager.trialDaysRemaining)")
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundStyle(DS.Colors.text)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                } else {
+                    // Free user info
+                    Rectangle()
+                        .fill(Color.white.opacity(0.08))
+                        .frame(height: 0.5)
+                        .padding(.horizontal, 14)
+                    
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Transactions")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(DS.Colors.subtext)
+                            Text("\(store.transactions.count) / \(SubscriptionManager.freeTransactionLimit)")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(DS.Colors.text)
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Remaining")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(DS.Colors.subtext)
+                            Text("\(max(0, SubscriptionManager.freeTransactionLimit - store.transactions.count))")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(
+                                    store.transactions.count >= SubscriptionManager.freeTransactionLimit - 10
+                                    ? DS.Colors.danger : DS.Colors.text
+                                )
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(DS.Colors.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
+            )
+        }
     }
     
     // MARK: - Account Info

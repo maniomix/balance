@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Supabase
 
 // MARK: - Subscription Manager
 // Simple feature gating — checks Supabase for subscription status
@@ -14,6 +15,9 @@ final class SubscriptionManager: ObservableObject {
     @Published var status: SubscriptionStatus = .free
     @Published var trialDaysRemaining: Int = 0
     @Published var isLoading: Bool = false
+    @Published var currentPlan: String = "free"           // free, monthly, yearly
+    @Published var currentPeriodEnd: Date? = nil           // تاریخ انقضای دوره فعلی
+    @Published var trialEndDate: Date? = nil               // تاریخ پایان تریال
     
     // MARK: - Limits
     static let freeTransactionLimit: Int = 50
@@ -102,9 +106,15 @@ final class SubscriptionManager: ObservableObject {
             
             guard let sub = response.first else {
                 status = .free
+                currentPlan = "free"
+                currentPeriodEnd = nil
+                trialEndDate = nil
                 saveToLocal()
                 return
             }
+            
+            // Store plan
+            currentPlan = sub.plan
             
             let parsed = SubscriptionStatus(rawValue: sub.status) ?? .free
             
@@ -113,18 +123,22 @@ final class SubscriptionManager: ObservableObject {
                 if let trialEnd = parseDate(sub.trialEnd), Date() < trialEnd {
                     status = .trial
                     trialDaysRemaining = Calendar.current.dateComponents([.day], from: Date(), to: trialEnd).day ?? 0
+                    trialEndDate = trialEnd
                 } else {
                     status = .expired
                     trialDaysRemaining = 0
+                    trialEndDate = nil
                     try? await updateStatus(userId: userId, to: "expired")
                 }
                 
             case .active:
                 if let periodEnd = parseDate(sub.currentPeriodEnd), Date() >= periodEnd {
                     status = .expired
+                    currentPeriodEnd = nil
                     try? await updateStatus(userId: userId, to: "expired")
                 } else {
                     status = .active
+                    currentPeriodEnd = parseDate(sub.currentPeriodEnd)
                 }
                 
             default:

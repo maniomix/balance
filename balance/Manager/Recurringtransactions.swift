@@ -3,6 +3,7 @@
 // ==========================================
 
 import SwiftUI
+import Combine
 
 // MARK: - Recurring Transaction Model
 
@@ -76,7 +77,6 @@ struct RecurringTransaction: Identifiable, Hashable, Codable {
 
 struct RecurringTransactionsView: View {
     @Binding var store: Store
-    @Environment(\.dismiss) private var dismiss
     @State private var showAddSheet = false
     
     var activeRecurring: [RecurringTransaction] {
@@ -88,51 +88,44 @@ struct RecurringTransactionsView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.bg.ignoresSafeArea()
-                
-                ScrollView {
-                    VStack(spacing: 20) {
-                        statsCard
-                        
-                        if !activeRecurring.isEmpty {
-                            sectionView(title: "Active", items: activeRecurring)
-                        }
-                        
-                        if !inactiveRecurring.isEmpty {
-                            sectionView(title: "Paused", items: inactiveRecurring, dimmed: true)
-                        }
-                        
-                        if store.recurringTransactions.isEmpty {
-                            emptyState
-                        }
+        ZStack {
+            DS.Colors.bg.ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 20) {
+                    statsCard
+
+                    if !activeRecurring.isEmpty {
+                        sectionView(title: "Active", items: activeRecurring)
                     }
-                    .padding(.vertical)
-                }
-            }
-            .navigationTitle("Recurring")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
-                        .foregroundStyle(DS.Colors.subtext)
-                }
-                
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showAddSheet = true
-                        Haptics.medium()
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(DS.Colors.text)
+
+                    if !inactiveRecurring.isEmpty {
+                        sectionView(title: "Paused", items: inactiveRecurring, dimmed: true)
+                    }
+
+                    if store.recurringTransactions.isEmpty {
+                        emptyState
                     }
                 }
+                .padding(.vertical)
             }
-            .sheet(isPresented: $showAddSheet) {
-                AddRecurringSheet(store: $store)
+        }
+        .navigationTitle("Recurring")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showAddSheet = true
+                    Haptics.medium()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(DS.Colors.text)
+                }
             }
+        }
+        .sheet(isPresented: $showAddSheet) {
+            AddRecurringSheet(store: $store)
         }
     }
     

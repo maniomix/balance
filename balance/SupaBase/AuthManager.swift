@@ -13,6 +13,7 @@ class AuthManager: ObservableObject {
     
     @Published var isAuthenticated = false
     @Published var currentUser: User?
+    @Published var isCheckingSession = true  // ← prevents login screen flash
     
     // Helper properties
     var userEmail: String {
@@ -27,13 +28,30 @@ class AuthManager: ObservableObject {
     }
     
     init() {
-        // Sync with Supabase auth state
+        // 1. Restore existing session immediately (prevents login screen flash)
         Task {
+            do {
+                let session = try await supabase.client.auth.session
+                await MainActor.run {
+                    self.currentUser = session.user
+                    self.isAuthenticated = true
+                    self.isCheckingSession = false
+                    print("🔐 Session restored: \(session.user.email ?? "nil")")
+                }
+            } catch {
+                await MainActor.run {
+                    self.isAuthenticated = false
+                    self.isCheckingSession = false
+                    print("🔐 No existing session")
+                }
+            }
+            
+            // 2. Then listen for future auth state changes
             for await state in await supabase.client.auth.authStateChanges {
                 await MainActor.run {
                     self.currentUser = state.session?.user
                     self.isAuthenticated = state.session != nil
-                    print("🔐 Auth state: \(self.isAuthenticated)")
+                    print("🔐 Auth state changed: \(self.isAuthenticated)")
                 }
             }
         }

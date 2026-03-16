@@ -62,9 +62,9 @@ struct SyncStatusView: View {
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isSyncing)
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: syncSuccess)
         }
-        .padding(.horizontal, 12)
-        .frame(height: 34)
-        .fixedSize()
+        .padding(.horizontal, 16)
+        .frame(height: 44)
+        .frame(minWidth: 130)
         .background { pillBg }
         .clipShape(Capsule())
         .overlay { if isSyncing { shimmer } }
@@ -371,9 +371,10 @@ private struct SyncPressStyle: ButtonStyle {
 // MARK: - Preview
 
 #Preview {
+    @Previewable @State var previewStore = Store()
     VStack {
         Spacer()
-        SyncStatusView()
+        SyncStatusView(store: $previewStore)
         Spacer()
     }
     .frame(maxWidth: .infinity)

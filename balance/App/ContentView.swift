@@ -45,6 +45,9 @@ struct ContentView: View {
             return
         }
         
+        // Load subscription status
+        Task { await SubscriptionManager.shared.loadSubscription() }
+        
         print("==================================================")
         print("📥 Loading user data...")
         print("👤 User ID: \(userId)")
@@ -254,9 +257,21 @@ struct ContentView: View {
                     .tabItem { Label("Insights", systemImage: "sparkles") }
                     .tag(Tab.insights)
 
+                AccountsListView()
+                .tabItem { Label("Accounts", systemImage: "building.columns") }
+                .tag(Tab.accounts)
+
+                GoalsOverviewView()
+                .tabItem { Label("Goals", systemImage: "target") }
+                .tag(Tab.goals)
+
+                SubscriptionsOverviewView()
+                .tabItem { Label("Subscriptions", systemImage: "creditcard.and.123") }
+                .tag(Tab.subscriptions)
+
                 SettingsView(store: $store)
-                    .tabItem { Label("Settings", systemImage: "gearshape") }
-                    .tag(Tab.settings)
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(Tab.settings)
             }
             .environmentObject(supabaseManager)
             .onChange(of: selectedTab) { _, _ in
@@ -280,16 +295,24 @@ struct ContentView: View {
             .onChange(of: store) { _, newStore in
                 // هر تغییری در store (اضافه/ادیت/حذف ترنزکشن)
                 // ruleها رو با debounce بررسی کن تا نوتیف تکراری ساخته/فایر نشه
-                guard notificationsEnabled else { return }
-
-                notifEvalWorkItem?.cancel()
-                let item = DispatchWorkItem {
-                    Task { try? await Task.sleep(nanoseconds: 100_000_000);
-                        await Notifications.evaluateSmartRules(store: newStore)
+                if notificationsEnabled {
+                    notifEvalWorkItem?.cancel()
+                    let item = DispatchWorkItem {
+                        Task { try? await Task.sleep(nanoseconds: 100_000_000);
+                            await Notifications.evaluateSmartRules(store: newStore)
+                        }
                     }
+                    notifEvalWorkItem = item
+                    DispatchQueue.main.asyncAfter(deadline: .now() + notifEvalDebounceSeconds, execute: item)
                 }
-                notifEvalWorkItem = item
-                DispatchQueue.main.asyncAfter(deadline: .now() + notifEvalDebounceSeconds, execute: item)
+
+                // Regenerate forecast on data changes (debounced via Task)
+                Task {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    await ForecastEngine.shared.generate(store: newStore)
+                    await SubscriptionEngine.shared.analyze(store: newStore)
+                    await ReviewEngine.shared.analyze(store: newStore)
+                }
             }
             // Save locally when the app is backgrounded
             .onChange(of: scenePhase) { _, phase in
@@ -366,7 +389,7 @@ struct ContentView: View {
     }
 }
 
-enum Tab: Hashable { case dashboard, transactions, budget, insights, settings }
+enum Tab: Hashable { case dashboard, transactions, budget, insights, accounts, goals, subscriptions, settings }
 // Shared category list used across views
 private var categories: [Category] { Category.allCases }
 
@@ -555,8 +578,8 @@ struct PDFExporter {
         categories: [Analytics.CategoryRow]
     ) -> Data {
         let pdfMetaData = [
-            kCGPDFContextCreator: "Balance App",
-            kCGPDFContextAuthor: "Balance",
+            kCGPDFContextCreator: "Centmond App",
+            kCGPDFContextAuthor: "Centmond",
             kCGPDFContextTitle: "Monthly Report - \(monthKey)"
         ]
         
@@ -584,7 +607,7 @@ struct PDFExporter {
         
         // Title
         let titleAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 28, weight: .bold), .foregroundColor: UIColor.label]
-        "Balance - Monthly Report".draw(at: CGPoint(x: margin, y: y), withAttributes: titleAttrs)
+        "Centmond - Monthly Report".draw(at: CGPoint(x: margin, y: y), withAttributes: titleAttrs)
         y += 50
         
         // Month
@@ -659,7 +682,7 @@ struct PDFExporter {
         let dateFormatter2 = DateFormatter()
         dateFormatter2.dateStyle = .long
         dateFormatter2.timeStyle = .short
-        "Generated on \(dateFormatter2.string(from: Date())) • Balance App".draw(at: CGPoint(x: margin, y: y), withAttributes: footerAttrs)
+        "Generated on \(dateFormatter2.string(from: Date())) • Centmond App".draw(at: CGPoint(x: margin, y: y), withAttributes: footerAttrs)
     }
     
     private static func drawCard(context: CGContext, rect: CGRect, title: String, value: String, color: UIColor) {
@@ -700,106 +723,56 @@ struct PDFExporter {
 // MARK: - Launch Screen Animation
 
 private struct LaunchScreenView: View {
-    @State private var logoScale: CGFloat = 0.3
-    @State private var logoOpacity: Double = 0
-    @State private var titleOffset: CGFloat = 30
+    @State private var titleScale: CGFloat = 0.7
     @State private var titleOpacity: Double = 0
-    @State private var taglineOffset: CGFloat = 20
+    @State private var taglineOffset: CGFloat = 15
     @State private var taglineOpacity: Double = 0
-    @State private var circleScale: CGFloat = 0
-    @State private var circleOpacity: Double = 0
     
     var onComplete: () -> Void
     
     var body: some View {
         ZStack {
-            backgroundLayer
-            logoLayer
+            Color.black.ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                Text("CENTMOND")
+                    .font(.custom("Pacifico-Regular", size: 48))
+                    .foregroundStyle(.white)
+                    .scaleEffect(titleScale)
+                    .opacity(titleOpacity)
+                
+                Text("SMART PERSONAL FINANCE")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .tracking(3)
+                    .foregroundStyle(.white.opacity(0.4))
+                    .offset(y: taglineOffset)
+                    .opacity(taglineOpacity)
+            }
         }
         .onAppear {
             startAnimation()
         }
     }
-
-    private var backgroundLayer: some View {
-        ZStack {
-            DS.Colors.bg.ignoresSafeArea()
-            
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            Color(hexValue: 0x667EEA).opacity(0.15),
-                            Color(hexValue: 0x764BA2).opacity(0.08),
-                            Color.clear
-                        ],
-                        center: .center,
-                        startRadius: 50,
-                        endRadius: 300
-                    )
-                )
-                .frame(width: 600, height: 600)
-                .scaleEffect(circleScale)
-                .opacity(circleOpacity)
-        }
-    }
-
-    private var logoLayer: some View {
-        VStack(spacing: 24) {
-            VStack(spacing: 8) {
-                Text("Balance")
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [
-                                Color(hexValue: 0x667EEA),
-                                Color(hexValue: 0x96a8fa)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .offset(y: titleOffset)
-                    .opacity(titleOpacity)
-                
-                Text("Control your spending, step by step")
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                    .foregroundStyle(DS.Colors.subtext)
-                    .offset(y: taglineOffset)
-                    .opacity(taglineOpacity)
-            }
-        }
-    }
     
     private func startAnimation() {
-        // Phase 1: Background circle (0-0.4s)
-        withAnimation(.easeOut(duration: 0.8)) {
-            circleScale = 1.0
-            circleOpacity = 1.0
-        }
-        
-        // Phase 2: Title slides up (0.3-1.0s)
-        withAnimation(.spring(response: 0.8, dampingFraction: 0.75, blendDuration: 0).delay(0.3)) {
-            titleOffset = 0
+        // Phase 1: Title fade in + scale up
+        withAnimation(.easeOut(duration: 0.9)) {
+            titleScale = 1.0
             titleOpacity = 1.0
         }
         
-        // Phase 3: Tagline fades in (0.6-1.2s)
-        withAnimation(.easeOut(duration: 0.6).delay(0.6)) {
+        // Phase 2: Tagline slides up
+        withAnimation(.easeOut(duration: 0.5).delay(0.5)) {
             taglineOffset = 0
             taglineOpacity = 1.0
         }
         
-        // Phase 4: Hold for a moment, then dismiss (total: 2.0s)
+        // Phase 3: Hold then fade out
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation(.easeInOut(duration: 0.4)) {
-                // Fade everything out
                 titleOpacity = 0
                 taglineOpacity = 0
-                circleOpacity = 0
             }
-            
-            // Complete after fade out
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 onComplete()
             }
@@ -814,6 +787,7 @@ private struct DashboardView: View {
     let goToBudget: () -> Void
     @State private var showAdd = false
     @State private var trendSelectedDay: Int? = nil
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
 
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var supabaseManager: SupabaseManager
@@ -860,10 +834,16 @@ private struct DashboardView: View {
                         SetupCard(goToBudget: goToBudget)
                     } else {
                         kpis
+                        ReviewDashboardCard(store: $store)
+                        SafeToSpendCard()
+                        ForecastDashboardCard()
                         trendCard
                         categoryCard
-                        paymentBreakdownCard  // ← جدید
+                        paymentBreakdownCard
                         advisorInsightsCard
+                        NetWorthDashboardCard()
+                        GoalsDashboardCard()
+                        SubscriptionsDashboardCard()
                     }
                 }
                 .padding(.horizontal, 16)
@@ -926,6 +906,12 @@ private struct DashboardView: View {
             if let userId = authManager.currentUser?.uid {
                 Task { try? await Task.sleep(nanoseconds: 100_000_000);
                 }
+            }
+            // Generate forecast
+            Task {
+                await ForecastEngine.shared.generate(store: store)
+                await SubscriptionEngine.shared.analyze(store: store)
+                await ReviewEngine.shared.analyze(store: store)
             }
         }
         .alert("Delete This Month", isPresented: $showDeleteMonthConfirm) {
@@ -1035,9 +1021,7 @@ private struct DashboardView: View {
             }
             
             // نمایش تعداد تراکنش‌های باقیمانده برای Free users
-            // MARK: - SUBSCRIPTION DISABLED - Uncomment to enable
-            /*
-                // تعداد کل تراکنش‌ها (همه ماه‌ها)
+            if !subscriptionManager.isPro {
                 let currentCount = store.transactions.count
                 let freeLimit = 50
                 let remaining = max(0, freeLimit - currentCount)
@@ -1052,27 +1036,6 @@ private struct DashboardView: View {
                         .foregroundColor(DS.Colors.subtext)
                     
                     Spacer()
-                    
-                    Button {
-                        showPaywall = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "crown.fill")
-                            Text("Go Pro")
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            LinearGradient(
-                                colors: [.yellow, .orange],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .cornerRadius(8)
-                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -1081,7 +1044,6 @@ private struct DashboardView: View {
                         .fill(DS.Colors.surface2)
                 )
             }
-            */
         }
     }
 
@@ -2345,21 +2307,40 @@ private struct TransactionsTrailingButtons: View {
     let uiAnim: Animation
     
     @State private var showSortMenu = false
+    @State private var showProAlert = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            // Recurring button - minimal design
+            // Recurring button - locked for free users
             Button {
-                Haptics.light()
-                showRecurring = true
+                if SubscriptionManager.shared.isPro {
+                    Haptics.light()
+                    showRecurring = true
+                } else {
+                    showProAlert = true
+                }
             } label: {
-                Image(systemName: "repeat.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(DS.Colors.text)
-                    .frame(width: 36, height: 36, alignment: .center)
+                ZStack {
+                    Image(systemName: "repeat.circle")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(SubscriptionManager.shared.isPro ? DS.Colors.text : DS.Colors.subtext.opacity(0.5))
+                        .frame(width: 36, height: 36, alignment: .center)
+                    
+                    if !SubscriptionManager.shared.isPro {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(DS.Colors.subtext)
+                            .offset(x: 10, y: -10)
+                    }
+                }
             }
             .buttonStyle(.plain)
             .disabled(disabled)
+            .alert("pro user access only", isPresented: $showProAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Recurring transactions are available for Pro users.")
+            }
             
             Button { showImport = true } label: {
                 Image(systemName: "arrow.down.circle")  // ← Circle version
@@ -2762,6 +2743,7 @@ private struct TransactionsFilterSheet: View {
 private struct BudgetView: View {
     @Binding var store: Store
     @State private var showPaywall = false
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
 
 
     @State private var editingTotal = ""
@@ -3046,6 +3028,28 @@ private struct BudgetView: View {
                                 }
                             }
                         }
+                        .overlay(alignment: .center) {
+                            if !subscriptionManager.isPro {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(.ultraThinMaterial)
+                                    
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "lock.fill")
+                                            .font(.system(size: 28))
+                                            .foregroundStyle(DS.Colors.subtext)
+                                        
+                                        Text("category budgets")
+                                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(DS.Colors.text)
+                                        
+                                        Text("pro user access only")
+                                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                                            .foregroundStyle(DS.Colors.subtext)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -3142,11 +3146,13 @@ private struct InsightsView: View {
     let goToBudget: () -> Void
     @State private var showAdvancedCharts: Bool = false
     @State private var showPaywall = false
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     
     @AppStorage("notifications.enabled") private var notificationsEnabled: Bool = false
     @State private var notifDetail: String? = nil
     
     @State private var shareURL: URL? = nil
+    @State private var showReportExport = false
 
     private struct TrendPoint: Identifiable {
         let id: Int          // day of month
@@ -3292,11 +3298,9 @@ private struct InsightsView: View {
 
                                 HStack(spacing: 10) {
                                     Button {
-                                        // SUBSCRIPTION DISABLED
-                                        // guard subscriptionManager.isPro else {
-                                        //     showPaywall = true
-                                        //     return
-                                        // }
+                                        guard subscriptionManager.isPro else {
+                                            return
+                                        }
                                         Haptics.medium()
                                         exportMonth(format: .excel)
                                     } label: {
@@ -3308,11 +3312,9 @@ private struct InsightsView: View {
                                     .buttonStyle(DS.PrimaryButton())
 
                                     Button {
-                                        // SUBSCRIPTION DISABLED
-                                        // guard subscriptionManager.isPro else {
-                                        //     showPaywall = true
-                                        //     return
-                                        // }
+                                        guard subscriptionManager.isPro else {
+                                            return
+                                        }
                                         Haptics.medium()
                                         exportMonth(format: .csv)
                                     } label: {
@@ -3325,17 +3327,15 @@ private struct InsightsView: View {
                                 }
                                 
                                 Button {
-                                    // SUBSCRIPTION DISABLED
-                                    // guard subscriptionManager.isPro else {
-                                    //     showPaywall = true
-                                    //     return
-                                    // }
+                                    guard subscriptionManager.isPro else {
+                                        return
+                                    }
                                     Haptics.medium()
-                                    exportMonth(format: .pdf)
+                                    showReportExport = true
                                 } label: {
                                     HStack {
                                         Image(systemName: "doc.richtext")
-                                        Text("Export PDF")
+                                        Text("Export PDF Report")
                                     }
                                     .frame(maxWidth: .infinity)
                                 }
@@ -3346,62 +3346,29 @@ private struct InsightsView: View {
                                     .foregroundStyle(DS.Colors.subtext)
                             }
                         }
-                        // SUBSCRIPTION DISABLED - Export overlay
-                        /*
                         .overlay(alignment: .center) {
+                            if !subscriptionManager.isPro {
                                 ZStack {
-                                    // Blur background
-                                    RoundedRectangle(cornerRadius: 14)
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                                         .fill(.ultraThinMaterial)
                                     
-                                    // Lock content
-                                    VStack(spacing: 12) {
+                                    VStack(spacing: 8) {
                                         Image(systemName: "lock.fill")
-                                            .font(.system(size: 40))
-                                            .foregroundStyle(
-                                                LinearGradient(
-                                                    colors: [.yellow, .orange],
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                )
-                                            )
+                                            .font(.system(size: 28))
+                                            .foregroundStyle(DS.Colors.subtext)
                                         
-                                        Text("Export Reports")
-                                            .font(.system(size: 18, weight: .bold))
-                                            .foregroundColor(DS.Colors.text)
+                                        Text("export reports")
+                                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(DS.Colors.text)
                                         
-                                        Text("Upgrade to Pro to unlock")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(DS.Colors.subtext)
-                                        
-                                        Button {
-                                            showPaywall = true
-                                        } label: {
-                                            HStack(spacing: 8) {
-                                                Image(systemName: "crown.fill")
-                                                Text("Upgrade Now")
-                                                    .fontWeight(.semibold)
-                                            }
-                                            .font(.system(size: 15))
-                                            .foregroundColor(.black)
-                                            .padding(.horizontal, 24)
-                                            .padding(.vertical, 12)
-                                            .background(
-                                                LinearGradient(
-                                                    colors: [.yellow, .orange],
-                                                    startPoint: .leading,
-                                                    endPoint: .trailing
-                                                )
-                                            )
-                                            .cornerRadius(12)
-                                        }
+                                        Text("pro user access only")
+                                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                                            .foregroundStyle(DS.Colors.subtext)
                                     }
-                                    .padding(.vertical, 20)
                                 }
                             }
                         }
                         .zIndex(1)
-                        */
                         
                         
                         // Advanced Charts
@@ -3422,11 +3389,9 @@ private struct InsightsView: View {
                                     .foregroundStyle(DS.Colors.subtext)
                                 
                                 Button {
-                                    // SUBSCRIPTION DISABLED
-                                    // guard subscriptionManager.isPro else {
-                                    //     showPaywall = true
-                                    //     return
-                                    // }
+                                    guard subscriptionManager.isPro else {
+                                        return
+                                    }
                                     Haptics.light()
                                     showAdvancedCharts = true
                                 } label: {
@@ -3439,62 +3404,29 @@ private struct InsightsView: View {
                                 .buttonStyle(DS.PrimaryButton())
                             }
                         }
-                        // SUBSCRIPTION DISABLED - Charts overlay
-                        /*
                         .overlay(alignment: .center) {
+                            if !subscriptionManager.isPro {
                                 ZStack {
-                                    // Blur background
-                                    RoundedRectangle(cornerRadius: 14)
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                                         .fill(.ultraThinMaterial)
                                     
-                                    // Lock content
-                                    VStack(spacing: 12) {
+                                    VStack(spacing: 8) {
                                         Image(systemName: "lock.fill")
-                                            .font(.system(size: 40))
-                                            .foregroundStyle(
-                                                LinearGradient(
-                                                    colors: [.yellow, .orange],
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                )
-                                            )
+                                            .font(.system(size: 28))
+                                            .foregroundStyle(DS.Colors.subtext)
                                         
-                                        Text("Advanced Charts")
-                                            .font(.system(size: 18, weight: .bold))
-                                            .foregroundColor(DS.Colors.text)
+                                        Text("advanced charts")
+                                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(DS.Colors.text)
                                         
-                                        Text("Upgrade to Pro to unlock")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(DS.Colors.subtext)
-                                        
-                                        Button {
-                                            showPaywall = true
-                                        } label: {
-                                            HStack(spacing: 8) {
-                                                Image(systemName: "crown.fill")
-                                                Text("Upgrade Now")
-                                                    .fontWeight(.semibold)
-                                            }
-                                            .font(.system(size: 15))
-                                            .foregroundColor(.black)
-                                            .padding(.horizontal, 24)
-                                            .padding(.vertical, 12)
-                                            .background(
-                                                LinearGradient(
-                                                    colors: [.yellow, .orange],
-                                                    startPoint: .leading,
-                                                    endPoint: .trailing
-                                                )
-                                            )
-                                            .cornerRadius(12)
-                                        }
+                                        Text("pro user access only")
+                                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                                            .foregroundStyle(DS.Colors.subtext)
                                     }
-                                    .padding(.vertical, 20)
                                 }
                             }
                         }
                         .zIndex(1)
-                        */
                         
                         
                         // Professional Analysis Website
@@ -3538,7 +3470,7 @@ private struct InsightsView: View {
                                 
                                 Button {
                                     Haptics.light()
-                                    if let url = URL(string: "https://balance-analysis.com") {
+                                    if let url = URL(string: "https://centmond.com") {
                                         // ← لینک رو بعداً عوض می‌کنی
                                         UIApplication.shared.open(url)
                                     }
@@ -3636,6 +3568,9 @@ private struct InsightsView: View {
             .sheet(isPresented: $showAdvancedCharts) {
                 AdvancedChartsView(store: $store)
             }
+            .sheet(isPresented: $showReportExport) {
+                ReportExportView(store: $store)
+            }
             .sheet(isPresented: $showPaywall) {
             }
         }
@@ -3706,7 +3641,7 @@ private struct InsightsView: View {
         center.removePendingNotificationRequests(withIdentifiers: ["balance.test.notification"])
 
         let content = UNMutableNotificationContent()
-        content.title = "Balance — Test"
+        content.title = "Centmond — Test"
         content.body = "This is a test notification. If you see this, notifications are working."
         content.sound = .default
 
@@ -3751,7 +3686,7 @@ private struct InsightsView: View {
         let m = comps.month ?? 0
         let monthKey = String(format: "%04d-%02d", y, m)
 
-        let filename = "Balance_\(monthKey).\(format.fileExtension)"
+        let filename = "Centmond_\(monthKey).\(format.fileExtension)"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
 
         do {
@@ -3781,12 +3716,16 @@ private struct InsightsView: View {
                     daily: dailyPoints
                 )
             case .pdf:
-                // PDF export redirects to website
-                Haptics.medium()
-                if let url = URL(string: "https://balance-app.com/export") {
-                    UIApplication.shared.open(url)
-                }
-                return  // Don't show share sheet for PDF
+                // Generate real monthly PDF report
+                let cal = Calendar.current
+                let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: store.selectedMonth))!
+                let monthEnd = cal.date(byAdding: .month, value: 1, to: monthStart)!
+                data = PDFReportGenerator.generate(
+                    type: .monthlySummary,
+                    store: store,
+                    startDate: monthStart,
+                    endDate: monthEnd
+                )
             }
 
             try data.write(to: url, options: .atomic)
@@ -3945,7 +3884,7 @@ struct BackupManager {
         dateFormatter.dateFormat = "yyyy-MM-dd_HHmmss"
         let timestamp = dateFormatter.string(from: Date())
         
-        let filename = "Balance_Backup_\(timestamp).json"
+        let filename = "Centmond_Backup_\(timestamp).json"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         
         do {
@@ -3977,92 +3916,9 @@ private struct SettingsView: View {
 
     
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        ScrollView {
                 VStack(spacing: 14) {
-                    // SUBSCRIPTION DISABLED - Pro Upgrade Card
-                    /*
-                    // Pro Upgrade Card (if not pro)
-                        Button {
-                            showPaywall = true
-                        } label: {
-                            DS.Card {
-                                HStack(spacing: 16) {
-                                    Image(systemName: "crown.fill")
-                                        .font(.system(size: 32))
-                                        .foregroundStyle(
-                                            LinearGradient(
-                                                colors: [.yellow, .orange],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Upgrade to Pro")
-                                            .font(.system(size: 17, weight: .bold))
-                                            .foregroundStyle(DS.Colors.text)
-                                        
-                                        Text("Unlimited transactions, cloud sync & more")
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(DS.Colors.subtext)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "arrow.right")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(DS.Colors.text)
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke(
-                                        LinearGradient(
-                                            colors: [.yellow.opacity(0.5), .orange.opacity(0.5)],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        ),
-                                        lineWidth: 1.5
-                                    )
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    
-                    // Pro Status Card (if pro)
-                        DS.Card {
-                            HStack(spacing: 16) {
-                                Image(systemName: "checkmark.seal.fill")
-                                    .font(.system(size: 32))
-                                    .foregroundStyle(
-                                        LinearGradient(
-                                            colors: [.green, .mint],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Balance Pro Active")
-                                        .font(.system(size: 17, weight: .bold))
-                                        .foregroundStyle(DS.Colors.text)
-                                    
-                                        Text("Renews on \(expiration, style: .date)")
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(DS.Colors.subtext)
-                                    }
-                                }
-                                
-                                Spacer()
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    */
-                    
-                    
+
                     // Profile Card
                     NavigationLink {
                         ProfileView(store: $store)
@@ -4107,7 +3963,7 @@ private struct SettingsView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    
+
                     // Support & Account Deletion
                     DS.Card {
                         VStack(alignment: .leading, spacing: 12) {
@@ -4132,7 +3988,7 @@ private struct SettingsView: View {
                             Divider().overlay(DS.Colors.grid)
                             
                             Button {
-                                if let url = URL(string: "mailto:support@balanceapp.com?subject=Support%20Request") {
+                                if let url = URL(string: "mailto:centmond.support@gmail.com?subject=Support%20Request") {
                                     UIApplication.shared.open(url)
                                 }
                                 Haptics.light()
@@ -4142,7 +3998,7 @@ private struct SettingsView: View {
                                         .font(.system(size: 14))
                                         .foregroundStyle(DS.Colors.accent)
                                     
-                                    Text("support@balanceapp.com")
+                                    Text("centmond.support@gmail.com")
                                         .font(.system(size: 14, weight: .medium))
                                         .foregroundStyle(DS.Colors.accent)
                                     
@@ -4241,7 +4097,7 @@ private struct SettingsView: View {
                                         .font(DS.Typography.caption)
                                         .foregroundStyle(DS.Colors.subtext)
                                     Spacer()
-                                    Text("GIORA")
+                                    Text("Centmond")
                                         .font(DS.Typography.body)
                                         .foregroundStyle(DS.Colors.text)
                                 }
@@ -4295,7 +4151,7 @@ private struct SettingsView: View {
                             VStack(spacing: 0) {
                                 // Contact Support
                                 Button {
-                                    if let url = URL(string: "mailto:giora.support@gmail.com?subject=Balance%20App%20Support") {
+                                    if let url = URL(string: "mailto:centmond.support@gmail.com?subject=Centmond%20App%20Support") {
                                         UIApplication.shared.open(url)
                                         Haptics.light()
                                     }
@@ -4303,7 +4159,7 @@ private struct SettingsView: View {
                                     supportRow(
                                         icon: "envelope.fill",
                                         title: "Contact Support",
-                                        subtitle: "giora.support@gmail.com",
+                                        subtitle: "centmond.support@gmail.com",
                                         iconColor: 0x667EEA
                                     )
                                 }
@@ -4313,7 +4169,7 @@ private struct SettingsView: View {
                                 
                                 // Report Bug
                                 Button {
-                                    if let url = URL(string: "mailto:giora.support@gmail.com?subject=Bug%20Report%20-%20Balance%20v1.0.0&body=Device:%20\(UIDevice.current.model)%0AiOS:%20\(UIDevice.current.systemVersion)%0AApp%20Version:%201.0.0%0ABuild:%202026.01%0A%0ADescribe%20the%20issue:%0A") {
+                                    if let url = URL(string: "mailto:centmond.support@gmail.com?subject=Bug%20Report%20-%20Centmond%20v1.0.0&body=Device:%20\(UIDevice.current.model)%0AiOS:%20\(UIDevice.current.systemVersion)%0AApp%20Version:%201.0.0%0ABuild:%202026.01%0A%0ADescribe%20the%20issue:%0A") {
                                         UIApplication.shared.open(url)
                                         Haptics.light()
                                     }
@@ -4331,7 +4187,7 @@ private struct SettingsView: View {
                                 
                                 // Feature Request
                                 Button {
-                                    if let url = URL(string: "mailto:giora.support@gmail.com?subject=Feature%20Request%20-%20Balance&body=I%20would%20love%20to%20see:%0A") {
+                                    if let url = URL(string: "mailto:centmond.support@gmail.com?subject=Feature%20Request%20-%20Centmond&body=I%20would%20love%20to%20see:%0A") {
                                         UIApplication.shared.open(url)
                                         Haptics.light()
                                     }
@@ -4414,7 +4270,7 @@ private struct SettingsView: View {
                             
                             // Copyright Footer
                             VStack(spacing: 6) {
-                                Text("© 2026 GIORA")
+                                Text("© 2026 Centmond")
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(DS.Colors.text)
                                 
@@ -4439,9 +4295,8 @@ private struct SettingsView: View {
                 // Paywall removed
                 EmptyView()
             }
-        }
     }
-    
+
     private var userEmail: String {
         authManager.userEmail
     }
@@ -4526,8 +4381,8 @@ private struct SettingsView: View {
                 
                 // App Info
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Balance")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                    Text("Centmond")
+                        .font(.custom("Pacifico-Regular", size: 20))
                         .foregroundStyle(DS.Colors.text)
                     
                     Text("Personal Finance Manager")
@@ -4582,7 +4437,7 @@ private struct SettingsView: View {
                 
                 // Copyright
                 VStack(spacing: 6) {
-                    Text("Developed by GIORA")
+                    Text("Developed by Mani")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(DS.Colors.text)
                     
@@ -4909,7 +4764,7 @@ private struct PrivacyPolicyView: View {
                 
                 privacySection(
                     title: "Your Privacy Matters",
-                    content: "Balance is designed with privacy at its core. All your financial data is stored locally on your device and optionally synced to your private iCloud account. We never have access to your financial information."
+                    content: "Centmond is designed with privacy at its core. All your financial data is stored locally on your device and optionally synced to your private iCloud account. We never have access to your financial information."
                 )
                 
                 privacySection(
@@ -4919,7 +4774,7 @@ private struct PrivacyPolicyView: View {
                 
                 privacySection(
                     title: "Analytics",
-                    content: "Balance does not use any third-party analytics or tracking tools. Your usage patterns remain completely private."
+                    content: "Centmond does not use any third-party analytics or tracking tools. Your usage patterns remain completely private."
                 )
                 
                 privacySection(
@@ -4934,7 +4789,7 @@ private struct PrivacyPolicyView: View {
                 
                 Divider().overlay(DS.Colors.grid)
                 
-                Text("For questions about privacy, contact giora.support@gmail.com")
+                Text("For questions about privacy, contact centmond.support@gmail.com")
                     .font(.system(size: 13))
                     .foregroundStyle(DS.Colors.subtext)
             }
@@ -4976,22 +4831,22 @@ private struct TermsOfServiceView: View {
                 
                 termsSection(
                     title: "1. Acceptance of Terms",
-                    content: "By using Balance, you agree to these Terms of Service. If you do not agree, please do not use the app."
+                    content: "By using Centmond, you agree to these Terms of Service. If you do not agree, please do not use the app."
                 )
                 
                 termsSection(
                     title: "2. Use of Service",
-                    content: "Balance is provided as-is for personal financial management. You are responsible for the accuracy of data you enter and for maintaining backups of your information."
+                    content: "Centmond is provided as-is for personal financial management. You are responsible for the accuracy of data you enter and for maintaining backups of your information."
                 )
                 
                 termsSection(
                     title: "3. Disclaimer",
-                    content: "Balance is a tool to help you manage your finances. It does not provide financial advice. Always consult with a qualified financial advisor for important financial decisions."
+                    content: "Centmond is a tool to help you manage your finances. It does not provide financial advice. Always consult with a qualified financial advisor for important financial decisions."
                 )
                 
                 termsSection(
                     title: "4. Limitation of Liability",
-                    content: "GIORA is not liable for any financial losses, damages, or decisions made based on information in Balance. Use the app at your own discretion."
+                    content: "Centmond is not liable for any financial losses, damages, or decisions made based on information in Centmond. Use the app at your own discretion."
                 )
                 
                 termsSection(
@@ -5001,12 +4856,12 @@ private struct TermsOfServiceView: View {
                 
                 termsSection(
                     title: "6. Contact",
-                    content: "For questions about these terms, contact us at giora.support@gmail.com"
+                    content: "For questions about these terms, contact us at centmond.support@gmail.com"
                 )
                 
                 Divider().overlay(DS.Colors.grid)
                 
-                Text("© 2026 GIORA. All rights reserved.")
+                Text("© 2026 Centmond. All rights reserved.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(DS.Colors.subtext)
             }
@@ -5097,7 +4952,7 @@ private struct LicensesView: View {
                         Divider().overlay(DS.Colors.grid)
                         
                         Text("""
-                        Balance is proprietary software developed by Mani. All rights reserved.
+                        Centmond is proprietary software developed by Mani. All rights reserved.
                         
                         This application and its content are protected by copyright and other intellectual property laws. You may not reverse engineer, decompile, or disassemble this application.
                         
@@ -6591,12 +6446,9 @@ struct AddTransactionSheet: View {
             DocumentPicker(fileData: $attachmentData, attachmentType: $attachmentType)
         }
         .alert("Transaction Limit Reached", isPresented: $showLimitAlert) {
-            Button("Upgrade to Pro") {
-                showPaywall = true
-            }
-            Button("Cancel", role: .cancel) {}
+            Button("OK", role: .cancel) {}
         } message: {
-            Text("Free users can create up to 50 transactions. Upgrade to Pro for unlimited transactions!")
+            Text("Free users can create up to 50 transactions. Pro users have unlimited transactions.")
         }
         .sheet(isPresented: $showPaywall) {
         }
@@ -9403,7 +9255,7 @@ private struct ImportTransactionsScreen: View {
                                 Text("CSV Format Requirements")
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(DS.Colors.text)
-                                Text("Note: If you import the same CSV again, Balance will only add transactions that aren’t already in the app (duplicates are skipped).")
+                                Text("Note: If you import the same CSV again, Centmond will only add transactions that aren’t already in the app (duplicates are skipped).")
                             }
                                 .font(DS.Typography.caption)
                                 .foregroundStyle(DS.Colors.subtext)

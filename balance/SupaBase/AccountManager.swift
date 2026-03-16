@@ -1,5 +1,6 @@
 import Foundation
 import Supabase
+import Combine
 
 // MARK: - Account Manager
 
@@ -18,8 +19,9 @@ class AccountManager: ObservableObject {
     
     // MARK: - Current User ID
     
-    private var currentUserId: String? {
-        AuthManager.shared.currentUser?.uid
+    private var currentUserId: UUID? {
+        guard let uid = AuthManager.shared.currentUser?.uid else { return nil }
+        return UUID(uuidString: uid)
     }
     
     // MARK: - Fetch Accounts
@@ -33,7 +35,7 @@ class AccountManager: ObservableObject {
             let response: [Account] = try await client
                 .from("accounts")
                 .select()
-                .eq("user_id", value: userId)
+                .eq("user_id", value: userId.uuidString)
                 .eq("is_archived", value: false)
                 .order("created_at", ascending: false)
                 .execute()
@@ -56,7 +58,7 @@ class AccountManager: ObservableObject {
             let response: [Account] = try await client
                 .from("accounts")
                 .select()
-                .eq("user_id", value: userId)
+                .eq("user_id", value: userId.uuidString)
                 .order("created_at", ascending: false)
                 .execute()
                 .value
