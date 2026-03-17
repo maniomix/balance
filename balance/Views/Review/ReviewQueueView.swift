@@ -43,6 +43,10 @@ struct ReviewQueueView: View {
             }
             .navigationTitle("Review")
             .navigationBarTitleDisplayMode(.large)
+            .onAppear {
+                AnalyticsManager.shared.track(.reviewQueueOpened(pendingCount: engine.pendingItems.count))
+            }
+            .trackScreen("review_queue")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if !engine.pendingItems.isEmpty {

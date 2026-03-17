@@ -11,8 +11,10 @@ import SwiftUI
 @main
 struct CentmondWidgetBundle: WidgetBundle {
     var body: some Widget {
-        CentmondWidget()
-        CentmondWidgetControl()
-        CentmondWidgetLiveActivity()
+        TodaySpendingWidget()
+        BudgetWidget()
+        UpcomingBillsWidget()
+        SafeToSpendWidget()
+        NetWorthWidget()
     }
 }

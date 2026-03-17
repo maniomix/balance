@@ -37,10 +37,13 @@ class GoalManager: ObservableObject {
                 .value
 
             self.goals = response
-            print("✅ Fetched \(response.count) goals")
+            SecureLogger.info("Fetched \(response.count) goals")
         } catch {
-            self.errorMessage = error.localizedDescription
-            print("❌ Fetch goals failed: \(error)")
+            self.errorMessage = AppConfig.shared.safeErrorMessage(
+                detail: error.localizedDescription,
+                fallback: "Could not load goals. Please try again."
+            )
+            SecureLogger.error("Fetch goals failed", error)
         }
 
         isLoading = false
@@ -51,12 +54,17 @@ class GoalManager: ObservableObject {
     func createGoal(_ goal: Goal) async -> Bool {
         do {
             try await client.from("goals").insert(goal).execute()
-            print("✅ Goal created: \(goal.name)")
+            SecureLogger.info("Goal created")
+            AnalyticsManager.shared.track(.goalCreated)
+            AnalyticsManager.shared.checkFirstGoal()
             await fetchGoals()
             return true
         } catch {
-            errorMessage = error.localizedDescription
-            print("❌ Create goal failed: \(error)")
+            errorMessage = AppConfig.shared.safeErrorMessage(
+                detail: error.localizedDescription,
+                fallback: "Could not create goal. Please try again."
+            )
+            SecureLogger.error("Create goal failed", error)
             return false
         }
     }
@@ -75,7 +83,7 @@ class GoalManager: ObservableObject {
             await fetchGoals()
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppConfig.shared.safeErrorMessage(detail: error.localizedDescription)
             return false
         }
     }
@@ -98,7 +106,7 @@ class GoalManager: ObservableObject {
             await fetchGoals()
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppConfig.shared.safeErrorMessage(detail: error.localizedDescription)
             return false
         }
     }
@@ -121,7 +129,9 @@ class GoalManager: ObservableObject {
             updated.currentAmount += amount
             if updated.currentAmount >= updated.targetAmount {
                 updated.isCompleted = true
+                AnalyticsManager.shared.track(.goalCompleted)
             }
+            AnalyticsManager.shared.track(.goalContribution)
             updated.updatedAt = Date()
 
             try await client.from("goals")
@@ -130,10 +140,10 @@ class GoalManager: ObservableObject {
                 .execute()
 
             await fetchGoals()
-            print("✅ Contribution added: \(amount) cents to \(goal.name)")
+            SecureLogger.info("Goal contribution added")
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppConfig.shared.safeErrorMessage(detail: error.localizedDescription)
             return false
         }
     }
@@ -164,10 +174,10 @@ class GoalManager: ObservableObject {
                 .execute()
 
             await fetchGoals()
-            print("✅ Withdrawal of \(withdrawAmount) cents from \(goal.name)")
+            SecureLogger.info("Goal withdrawal processed")
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = AppConfig.shared.safeErrorMessage(detail: error.localizedDescription)
             return false
         }
     }

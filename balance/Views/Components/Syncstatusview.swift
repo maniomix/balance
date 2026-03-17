@@ -1,13 +1,12 @@
 import SwiftUI
-import Supabase
 
 // MARK: - Sync Status View
 
 struct SyncStatusView: View {
     @Binding var store: Store
-    @EnvironmentObject private var supabase: SupabaseManager
     @EnvironmentObject private var authManager: AuthManager
-    
+    @ObservedObject private var syncCoordinator = SyncCoordinator.shared
+
     @State private var isSyncingManually: Bool = false
     @State private var syncSuccess: Bool = false
     
@@ -30,7 +29,7 @@ struct SyncStatusView: View {
     private let errorOrange = Color(red: 0.95, green: 0.60, blue: 0.25)
     
     private var isSyncing: Bool {
-        supabase.isSyncing || isSyncingManually
+        syncCoordinator.status == .syncing || isSyncingManually
     }
     
     var body: some View {
@@ -41,8 +40,8 @@ struct SyncStatusView: View {
             }
         }
         .buttonStyle(SyncPressStyle())
-        .onChange(of: supabase.isSyncing) { _, newValue in
-            if !newValue && isSyncingManually {
+        .onChange(of: syncCoordinator.status) { _, newStatus in
+            if newStatus != .syncing && isSyncingManually {
                 onSyncComplete()
             }
         }
@@ -206,13 +205,17 @@ struct SyncStatusView: View {
         return syncedGreen
     }
     
-    private var hasError: Bool { supabase.syncError != nil }
-    
+    private var hasError: Bool {
+        if case .error = syncCoordinator.status { return true }
+        return false
+    }
+
     private var statusTitle: String {
         if isSyncing { return "Syncing..." }
         if syncSuccess { return "Synced ✓" }
         if hasError { return "Retry" }
-        if let lastSync = supabase.lastSyncTime {
+        if case .offline = syncCoordinator.status { return "Offline" }
+        if let lastSync = syncCoordinator.lastSuccessfulSync {
             return "Synced · \(timeAgo(from: lastSync))"
         }
         return "Sync"
@@ -252,33 +255,24 @@ struct SyncStatusView: View {
     
     private func triggerManualSync() {
         guard !isSyncing else { return }
-        
+
         Haptics.medium()
         isSyncingManually = true
         syncSuccess = false
-        
+
         Task {
-            do {
-                guard let userId = authManager.currentUser?.uid else {
-                    await MainActor.run { resetState() }
-                    return
-                }
-                
-                // ✅ Use live store from binding (not stale Store.load)
-                print("📥 Manual sync: pulling from cloud...")
-                let syncedStore = try await supabase.syncStore(store)
-                
+            guard let userId = authManager.currentUser?.uid else {
+                await MainActor.run { resetState() }
+                return
+            }
+
+            if let reconciled = await syncCoordinator.fullReconcile(store: store, userId: userId) {
                 await MainActor.run {
-                    // ✅ Update the live binding — UI refreshes immediately
-                    store = syncedStore
+                    store = reconciled
                     store.save(userId: userId)
                     onSyncComplete()
                 }
-                
-                print("✅ Manual sync completed! \(syncedStore.transactions.count) transactions")
-                
-            } catch {
-                print("❌ Manual sync failed: \(error)")
+            } else {
                 await MainActor.run {
                     resetState()
                     Haptics.error()
@@ -379,6 +373,5 @@ private struct SyncPressStyle: ButtonStyle {
     }
     .frame(maxWidth: .infinity)
     .background(Color(uiColor: .systemBackground))
-    .environmentObject(SupabaseManager.shared)
     .environmentObject(AuthManager.shared)
 }

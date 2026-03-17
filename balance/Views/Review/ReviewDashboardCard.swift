@@ -1,11 +1,9 @@
 import SwiftUI
 
 // ============================================================
-// MARK: - Review Dashboard Card
+// MARK: - Review Dashboard Card (Redesigned)
 // ============================================================
-//
-// Compact dashboard card showing transaction review summary.
-// Shows pending count, high-priority alerts, and quick link.
+// Minimal banner-style card: icon + count + top issue + action.
 // ============================================================
 
 struct ReviewDashboardCard: View {
@@ -15,109 +13,82 @@ struct ReviewDashboardCard: View {
 
     var body: some View {
         if engine.pendingCount > 0 {
-            DS.Card {
-                VStack(alignment: .leading, spacing: 10) {
-                    // Header
-                    HStack {
-                        Image(systemName: "tray")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(DS.Colors.warning)
-
-                        Text("Needs Review")
-                            .font(DS.Typography.section)
-                            .foregroundStyle(DS.Colors.text)
-
-                        Spacer()
-
-                        Button {
-                            showReviewQueue = true
-                            Haptics.medium()
-                        } label: {
-                            Text("Review All")
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundStyle(DS.Colors.accent)
-                        }
-                    }
-
-                    // Summary counts
+            Button {
+                showReviewQueue = true
+                Haptics.medium()
+            } label: {
+                DS.Card {
                     HStack(spacing: 12) {
-                        reviewStat(
-                            count: engine.pendingCount,
-                            label: "Items",
-                            color: DS.Colors.accent
-                        )
+                        // Icon with badge
+                        ZStack(alignment: .topTrailing) {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(DS.Colors.warning.opacity(0.12))
+                                .frame(width: 40, height: 40)
 
-                        if engine.highPriorityCount > 0 {
-                            reviewStat(
-                                count: engine.highPriorityCount,
-                                label: "Urgent",
-                                color: DS.Colors.danger
-                            )
+                            Image(systemName: "tray.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(DS.Colors.warning)
+                                .frame(width: 40, height: 40)
+
+                            if engine.highPriorityCount > 0 {
+                                Circle()
+                                    .fill(DS.Colors.danger)
+                                    .frame(width: 14, height: 14)
+                                    .overlay(
+                                        Text("\(engine.highPriorityCount)")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundStyle(.white)
+                                    )
+                                    .offset(x: 4, y: -4)
+                            }
                         }
 
-                        if engine.uncategorizedCount > 0 {
-                            reviewStat(
-                                count: engine.uncategorizedCount,
-                                label: "Uncategorized",
-                                color: DS.Colors.warning
-                            )
-                        }
+                        // Info
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(engine.pendingCount) items need review")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DS.Colors.text)
 
-                        if engine.duplicateCount > 0 {
-                            reviewStat(
-                                count: engine.duplicateCount,
-                                label: "Duplicates",
-                                color: DS.Colors.danger
-                            )
+                            // Top issue preview
+                            if let top = engine.pendingItems.first {
+                                Text(top.reason)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(DS.Colors.subtext)
+                                    .lineLimit(1)
+                            }
                         }
 
                         Spacer()
-                    }
 
-                    // Top priority items preview (up to 2)
-                    let topItems = engine.pendingItems.prefix(2)
-                    ForEach(Array(topItems)) { item in
-                        HStack(spacing: 8) {
-                            Image(systemName: item.type.icon)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(item.type.color)
-                                .frame(width: 16)
-
-                            Text(item.reason)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(DS.Colors.text)
-                                .lineLimit(1)
-
-                            Spacer()
-
-                            Text(item.priority.displayName)
-                                .font(.system(size: 9, weight: .bold, design: .rounded))
-                                .foregroundStyle(item.priority.color)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(item.priority.color.opacity(0.1), in: Capsule())
+                        // Tags
+                        VStack(alignment: .trailing, spacing: 4) {
+                            if engine.uncategorizedCount > 0 {
+                                tagPill("\(engine.uncategorizedCount) uncategorized", DS.Colors.warning)
+                            }
+                            if engine.duplicateCount > 0 {
+                                tagPill("\(engine.duplicateCount) duplicate", DS.Colors.danger)
+                            }
                         }
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(DS.Colors.subtext.opacity(0.3))
                     }
                 }
             }
+            .buttonStyle(.plain)
             .sheet(isPresented: $showReviewQueue) {
                 ReviewQueueView(store: $store)
             }
         }
     }
 
-    private func reviewStat(count: Int, label: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Text("\(count)")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(DS.Colors.subtext)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(color.opacity(0.08), in: Capsule())
+    private func tagPill(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.1), in: Capsule())
     }
 }

@@ -110,10 +110,10 @@ class NetWorthManager: ObservableObject {
                 }
                 .sorted { $0.date < $1.date }
             
-            print("✅ Net worth history: \(historyDataPoints.count) data points")
-            
+            SecureLogger.info("Net worth history: \(historyDataPoints.count) data points")
+
         } catch {
-            print("❌ Failed to fetch net worth history: \(error.localizedDescription)")
+            SecureLogger.error("Failed to fetch net worth history", error)
         }
         
         isLoading = false

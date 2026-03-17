@@ -52,6 +52,7 @@ struct ReportExportView: View {
                 ShareSheetWrapper(items: [url])
                     .ignoresSafeArea()
             }
+            .trackScreen("export_report")
             .alert("Export Error", isPresented: .init(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -320,6 +321,7 @@ struct ReportExportView: View {
                     isGenerating = false
                     shareURL = url
                     Haptics.success()
+                    AnalyticsManager.shared.track(.exportUsed(format: "pdf_report"))
                 }
             } catch {
                 await MainActor.run {

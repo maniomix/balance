@@ -2,7 +2,8 @@ import SwiftUI
 import Supabase
 
 struct SupabaseTestView: View {
-    @StateObject private var supabase = SupabaseManager.shared
+    @EnvironmentObject private var authManager: AuthManager
+    private var supabase: SupabaseManager { SupabaseManager.shared }
     @State private var testResult = "Not tested yet"
     @State private var isLoading = false
     
@@ -29,11 +30,11 @@ struct SupabaseTestView: View {
             .buttonStyle(.borderedProminent)
             .disabled(isLoading)
             
-            if supabase.isAuthenticated {
+            if authManager.isAuthenticated {
                 VStack {
                     Text("✅ Authenticated")
                         .foregroundColor(.green)
-                    Text("User ID: \(supabase.currentUser?.id.uuidString ?? "N/A")")
+                    Text("User ID: \(authManager.currentUser?.id.uuidString ?? "N/A")")
                         .font(.caption)
                 }
                 .padding()

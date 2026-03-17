@@ -77,14 +77,36 @@ class ReviewEngine: ObservableObject {
 
     // MARK: - Main Analysis
 
+    /// Analyze transactions for the selected month.
+    /// Results change when the user navigates between months.
     func analyze(store: Store) async {
         isLoading = true
 
-        let transactions = store.transactions
+        let cal = Calendar.current
+        let selectedMonth = store.selectedMonth
+
+        // Filter transactions relevant to the selected month:
+        // Use selected month ± 1 month for context (duplicate detection, spike comparison)
+        let contextStart = cal.date(byAdding: .month, value: -2, to:
+            cal.date(from: cal.dateComponents([.year, .month], from: selectedMonth))!)!
+        let contextEnd = cal.date(byAdding: .month, value: 2, to:
+            cal.date(from: cal.dateComponents([.year, .month], from: selectedMonth))!)!
+
+        let contextTransactions = store.transactions.filter {
+            $0.date >= contextStart && $0.date < contextEnd
+        }
+        // Primary month transactions (for uncategorized, duplicates)
+        let monthTransactions = store.transactions.filter {
+            cal.isDate($0.date, equalTo: selectedMonth, toGranularity: .month)
+        }
         let recurring = store.recurringTransactions
 
         let result = await Task.detached(priority: .userInitiated) {
-            Self.detect(transactions: transactions, recurringTransactions: recurring)
+            Self.detect(
+                transactions: monthTransactions,
+                contextTransactions: contextTransactions,
+                recurringTransactions: recurring
+            )
         }.value
 
         // Merge: keep manually resolved items, replace pending auto-detected ones
@@ -109,6 +131,7 @@ class ReviewEngine: ObservableObject {
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[idx].status = .resolved
         items[idx].resolvedAt = Date()
+        AnalyticsManager.shared.track(.reviewItemResolved(type: item.type.rawValue))
     }
 
     /// Dismiss an item (user says it's fine)
@@ -116,6 +139,7 @@ class ReviewEngine: ObservableObject {
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[idx].status = .dismissed
         items[idx].resolvedAt = Date()
+        AnalyticsManager.shared.track(.reviewItemResolved(type: "dismissed_\(item.type.rawValue)"))
 
         // Remember this so it doesn't reappear
         let key = item.transactionIds.map { $0.uuidString }.sorted().joined(separator: "|")
@@ -178,32 +202,32 @@ class ReviewEngine: ObservableObject {
 
     // MARK: - Pure Detection (off main thread)
 
+    /// Detect review items for the selected month.
+    /// - `transactions`: transactions IN the selected month (primary focus)
+    /// - `contextTransactions`: transactions ± 2 months (for spike comparison, recurring detection)
     nonisolated static func detect(
         transactions: [Transaction],
+        contextTransactions: [Transaction],
         recurringTransactions: [RecurringTransaction]
     ) -> [ReviewItem] {
         var items: [ReviewItem] = []
 
         let cal = Calendar.current
-        let now = Date()
-        // Focus on last 6 months for relevance
-        let sixMonthsAgo = cal.date(byAdding: .month, value: -6, to: now)!
-        let recent = transactions.filter { $0.date >= sixMonthsAgo }
 
-        // ─── Rule 1: Uncategorized ───
-        items.append(contentsOf: detectUncategorized(recent))
+        // ─── Rule 1: Uncategorized (selected month only) ───
+        items.append(contentsOf: detectUncategorized(transactions))
 
-        // ─── Rule 2: Possible Duplicates ───
-        items.append(contentsOf: detectDuplicates(recent))
+        // ─── Rule 2: Possible Duplicates (selected month only) ───
+        items.append(contentsOf: detectDuplicates(transactions))
 
-        // ─── Rule 3: Spending Spikes ───
-        items.append(contentsOf: detectSpikes(recent, cal: cal))
+        // ─── Rule 3: Spending Spikes (use context for averages, flag selected month tx) ───
+        items.append(contentsOf: detectSpikes(transactions, contextTransactions: contextTransactions, cal: cal))
 
-        // ─── Rule 4: Recurring Candidates ───
-        items.append(contentsOf: detectRecurringCandidates(recent, existing: recurringTransactions, cal: cal))
+        // ─── Rule 4: Recurring Candidates (use context for pattern detection) ───
+        items.append(contentsOf: detectRecurringCandidates(contextTransactions, existing: recurringTransactions, cal: cal))
 
-        // ─── Rule 5: Merchant Normalization ───
-        items.append(contentsOf: detectMerchantIssues(recent))
+        // ─── Rule 5: Merchant Normalization (selected month only) ───
+        items.append(contentsOf: detectMerchantIssues(transactions))
 
         return items
     }
@@ -367,45 +391,49 @@ class ReviewEngine: ObservableObject {
 
     // MARK: Rule 3: Spending Spikes
 
-    nonisolated private static func detectSpikes(_ transactions: [Transaction], cal: Calendar) -> [ReviewItem] {
+    /// Detect spending spikes in the selected month.
+    /// Uses contextTransactions (broader range) to compute category averages,
+    /// then flags selected-month transactions that exceed the average.
+    nonisolated private static func detectSpikes(
+        _ monthTransactions: [Transaction],
+        contextTransactions: [Transaction],
+        cal: Calendar
+    ) -> [ReviewItem] {
         var items: [ReviewItem] = []
 
-        let expenses = transactions.filter { $0.type == .expense }
+        let monthExpenses = monthTransactions.filter { $0.type == .expense }
+        let contextExpenses = contextTransactions.filter { $0.type == .expense }
 
-        // Group by category
-        var byCategory: [String: [Transaction]] = [:]
-        for tx in expenses {
-            byCategory[tx.category.storageKey, default: []].append(tx)
+        // Build category averages from context transactions
+        var contextByCategory: [String: [Int]] = [:]
+        for tx in contextExpenses {
+            contextByCategory[tx.category.storageKey, default: []].append(tx.amount)
         }
 
-        for (_, txs) in byCategory {
-            guard txs.count >= 3 else { continue }
+        for tx in monthExpenses {
+            let catKey = tx.category.storageKey
+            guard let catAmounts = contextByCategory[catKey], catAmounts.count >= 3 else { continue }
 
-            let amounts = txs.map { $0.amount }
-            let sorted = amounts.sorted()
-
-            // Use trimmed mean (drop top/bottom 10%) for more robust average
+            let sorted = catAmounts.sorted()
             let trimCount = max(1, sorted.count / 10)
             let trimmed = Array(sorted.dropFirst(trimCount).dropLast(trimCount))
             let avg = trimmed.isEmpty ? (sorted.reduce(0, +) / sorted.count) : (trimmed.reduce(0, +) / trimmed.count)
 
             guard avg > 0 else { continue }
 
-            for tx in txs {
-                let ratio = Double(tx.amount) / Double(avg)
-                if ratio >= 3.0 {
-                    let priority: ReviewPriority = ratio >= 5.0 ? .high : .medium
+            let ratio = Double(tx.amount) / Double(avg)
+            if ratio >= 3.0 {
+                let priority: ReviewPriority = ratio >= 5.0 ? .high : .medium
 
-                    items.append(ReviewItem(
-                        transactionIds: [tx.id],
-                        type: .spendingSpike,
-                        priority: priority,
-                        reason: "€\(String(format: "%.2f", Double(tx.amount) / 100.0)) is \(String(format: "%.1f", ratio))x the average for \(tx.category.title)",
-                        suggestedAction: .reviewAmount,
-                        spikeAmount: tx.amount,
-                        spikeAverage: avg
-                    ))
-                }
+                items.append(ReviewItem(
+                    transactionIds: [tx.id],
+                    type: .spendingSpike,
+                    priority: priority,
+                    reason: "€\(String(format: "%.2f", Double(tx.amount) / 100.0)) is \(String(format: "%.1f", ratio))x the average for \(tx.category.title)",
+                    suggestedAction: .reviewAmount,
+                    spikeAmount: tx.amount,
+                    spikeAverage: avg
+                ))
             }
         }
 

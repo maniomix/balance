@@ -4,15 +4,10 @@
 //
 //  Created by Mani on 16.03.26.
 //
+//  NOTE: Widget configuration intents are not currently used.
+//  All widgets use StaticConfiguration with BalanceTimelineProvider.
+//  This file is kept for Xcode target membership.
+//
 
 import WidgetKit
 import AppIntents
-
-struct ConfigurationAppIntent: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource { "Configuration" }
-    static var description: IntentDescription { "This is an example widget." }
-
-    // An example configurable parameter.
-    @Parameter(title: "Favorite Emoji", default: "😃")
-    var favoriteEmoji: String
-}

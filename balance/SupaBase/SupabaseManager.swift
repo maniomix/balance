@@ -4,111 +4,104 @@ import SwiftUI
 import Combine
 
 // MARK: - Supabase Manager
+// ============================================================
+//
+// Data access layer for Supabase. Handles CRUD operations
+// for transactions, budgets, categories, and recurring items.
+//
+// Auth state is managed exclusively by AuthManager.
+// Sync orchestration is managed by SyncCoordinator.
+// This class only provides the raw read/write operations.
+//
+// ============================================================
 @MainActor
 class SupabaseManager: ObservableObject {
     static let shared = SupabaseManager()
-    
-    var client: SupabaseClient! // Made public for AuthManager
-    
-    @Published var currentUser: User?
-    @Published var isAuthenticated = false
-    @Published var lastSyncTime: Date?
-    @Published var lastSyncDate: Date? // For compatibility with views
+
+    var client: SupabaseClient! // Used by AuthManager for auth operations
+
+    /// Tracks whether a sync operation is in progress (used internally).
     @Published var isSyncing = false
-    @Published var syncError: String?
-    
+
+    /// Auth state — delegates to AuthManager as single source of truth.
+    var currentUser: User? { AuthManager.shared.currentUser }
+
     init() {
         setupClient()
     }
-    
+
     private func setupClient() {
-        // Load from Supabase.plist
-        guard let path = Bundle.main.path(forResource: "Supabase", ofType: "plist"),
-              let config = NSDictionary(contentsOfFile: path),
-              let url = config["SUPABASE_URL"] as? String,
-              let anonKey = config["SUPABASE_ANON_KEY"] as? String else {
-            print("❌ Missing Supabase.plist")
+        let config = AppConfig.shared
+        config.validate()
+
+        guard !config.supabaseURL.isEmpty, !config.supabaseAnonKey.isEmpty,
+              let supabaseURL = URL(string: config.supabaseURL) else {
+            SecureLogger.error("Missing Supabase configuration. Check Config.plist.")
             return
         }
-        
+
         client = SupabaseClient(
-            supabaseURL: URL(string: url)!,
-            supabaseKey: anonKey
+            supabaseURL: supabaseURL,
+            supabaseKey: config.supabaseAnonKey
         )
-        
-        print("✅ Supabase client initialized")
-        
-        // Listen for auth changes
-        Task {
-            for await state in await client.auth.authStateChanges {
-                await MainActor.run {
-                    self.currentUser = state.session?.user
-                    self.isAuthenticated = state.session != nil
-                    print("🔐 Auth state changed: \(self.isAuthenticated)")
-                }
-            }
-        }
+
+        SecureLogger.info("Supabase client initialized [\(config.environment.rawValue)]")
     }
     
     // MARK: - Auth Methods
     
     func signUp(email: String, password: String, displayName: String? = nil) async throws {
-        print("📝 Signing up: \(email)")
-        
+        SecureLogger.info("Starting sign up")
+
         do {
             let response = try await client.auth.signUp(email: email, password: password)
-            print("✅ Auth sign up successful")
-            print("   User ID: \(response.user.id.uuidString)")
-            
+            SecureLogger.info("Auth sign up successful")
+
             // Create user profile
             let userId = response.user.id.uuidString
-            
+
             let userData: [String: String] = [
                 "id": userId,
                 "email": email,
                 "display_name": displayName ?? "User"
             ]
-            
-            print("📊 Inserting user profile: \(userData)")
-            
+
             try await client.database
                 .from("users")
                 .insert(userData)
                 .execute()
-            
-            print("✅ User profile created")
-            print("✅ Sign up completed successfully!")
-            
+
+            SecureLogger.info("User profile created")
+
         } catch {
-            print("❌ Sign up error: \(error)")
-            print("   Error details: \(error.localizedDescription)")
+            SecureLogger.error("Sign up failed", error)
             throw error
         }
     }
     
     func signIn(email: String, password: String) async throws {
-        print("🔑 Signing in: \(email)")
+        SecureLogger.info("Signing in")
         try await client.auth.signIn(email: email, password: password)
-        print("✅ Sign in successful")
+        SecureLogger.info("Sign in successful")
     }
-    
+
     func signOut() throws {
-        print("👋 Signing out")
+        SecureLogger.info("Signing out")
         Task {
             try await client.auth.signOut()
         }
     }
-    
+
     func resetPassword(email: String) async throws {
-        print("🔄 Resetting password for: \(email)")
+        SecureLogger.info("Password reset requested")
         try await client.auth.resetPasswordForEmail(email)
-        print("✅ Password reset email sent")
+        SecureLogger.info("Password reset email sent")
     }
-    
+
     func changePassword(newPassword: String) async throws {
-        print("🔒 Changing password")
+        SecureLogger.info("Changing password")
         try await client.auth.update(user: UserAttributes(password: newPassword))
-        print("✅ Password changed")
+        SecureLogger.info("Password changed")
     }
     
     // MARK: - Store Sync (Complete Store)
@@ -121,7 +114,7 @@ class SupabaseManager: ObservableObject {
         isSyncing = true
         defer { isSyncing = false }
         
-        print("🔄 Syncing store...")
+        SecureLogger.info("Syncing store")
         
         // Load all data
         let transactions = try await loadTransactions(userId: userId)
@@ -130,22 +123,48 @@ class SupabaseManager: ObservableObject {
         let customCategories = try await loadCustomCategories(userId: userId)
         let recurringTransactions = try await loadRecurringTransactions(userId: userId)
         
-        // Create new store with synced data
+        // Merge strategy for budgets:
+        //   Cloud is authoritative. Local values are only preserved as a
+        //   safety net when the cloud has NO entry at all for a given month
+        //   (key missing from dictionary). This prevents data loss during
+        //   offline edits while still allowing intentional zero-value budgets.
+        //
+        //   If cloud returns a key (even with value 0), cloud wins.
+        //   If cloud is missing a key entirely, local value is kept.
+        var mergedBudgets = budgets
+        for (key, value) in localStore.budgetsByMonth {
+            if mergedBudgets[key] == nil {
+                // Cloud doesn't have this month at all — preserve local
+                mergedBudgets[key] = value
+            }
+            // If cloud has the key (even == 0), cloud wins — no override
+        }
+        var mergedCategoryBudgets = categoryBudgets
+        for (monthKey, localCats) in localStore.categoryBudgetsByMonth {
+            if mergedCategoryBudgets[monthKey] == nil {
+                // Cloud has no data for this month — preserve all local categories
+                mergedCategoryBudgets[monthKey] = localCats
+            } else {
+                // Cloud has this month — only fill in categories cloud is missing entirely
+                for (catKey, value) in localCats {
+                    if mergedCategoryBudgets[monthKey]?[catKey] == nil {
+                        mergedCategoryBudgets[monthKey]?[catKey] = value
+                    }
+                }
+            }
+        }
+
         var syncedStore = localStore
         syncedStore.transactions = transactions
-        syncedStore.budgetsByMonth = budgets
-        syncedStore.categoryBudgetsByMonth = categoryBudgets
+        syncedStore.budgetsByMonth = mergedBudgets
+        syncedStore.categoryBudgetsByMonth = mergedCategoryBudgets
         syncedStore.customCategoriesWithIcons = customCategories
         syncedStore.recurringTransactions = recurringTransactions
         
         // ✅ Sync customCategoryNames from server (not merge with local)
         syncedStore.customCategoryNames = customCategories.map { $0.name }.sorted { $0.lowercased() < $1.lowercased() }
         
-        lastSyncTime = Date()
-        lastSyncDate = Date()
-        syncError = nil
-        
-        print("✅ Store synced: \(transactions.count) transactions, \(recurringTransactions.count) recurring, \(customCategories.count) custom categories")
+        SecureLogger.info("Store synced: \(transactions.count) transactions, \(recurringTransactions.count) recurring, \(customCategories.count) custom categories")
         return syncedStore
     }
     
@@ -155,16 +174,16 @@ class SupabaseManager: ObservableObject {
         isSyncing = true
         defer { isSyncing = false }
         
-        print("💾 Saving store...")
+        SecureLogger.debug("Saving store")
         
         // 1. Hard delete removed transactions from Supabase
         for deletedId in store.deletedTransactionIds {
             if let uuid = UUID(uuidString: deletedId) {
                 do {
                     try await deleteTransaction(uuid)
-                    print("🗑️ Deleted transaction: \(deletedId)")
+                    SecureLogger.debug("Deleted transaction")
                 } catch {
-                    print("❌ Failed to delete transaction \(deletedId): \(error)")
+                    SecureLogger.error("Failed to delete transaction")
                 }
             }
         }
@@ -189,16 +208,15 @@ class SupabaseManager: ObservableObject {
         // Delete budgets that exist on server but not locally
         for sb in serverBudgets {
             if !localBudgetMonths.contains(sb.month) {
-                print("🗑️ Deleting budget for month \(sb.month) from server")
+                SecureLogger.debug("Deleting budget and category budgets for month")
                 try await client.database
                     .from("budgets")
                     .delete()
                     .eq("user_id", value: userId.lowercased())
                     .eq("month", value: sb.month)
                     .execute()
-                
+
                 // Also delete all category budgets for that month
-                print("🗑️ Deleting category budgets for month \(sb.month) from server")
                 try await client.database
                     .from("category_budgets")
                     .delete()
@@ -252,8 +270,7 @@ class SupabaseManager: ObservableObject {
         // 6. Save recurring transactions
         try await saveRecurringTransactions(store.recurringTransactions, userId: userId)
         
-        lastSyncTime = Date()
-        print("✅ Store saved")
+        SecureLogger.info("Store saved")
     }
     
     // MARK: - Transactions
@@ -290,8 +307,8 @@ class SupabaseManager: ObservableObject {
             let date: String
         }
         
-        print("🔍 Loading transactions for user: \(userIdLowercase)")
-        
+        SecureLogger.debug("Loading transactions")
+
         let response: [TransactionDTO] = try await client.database
             .from("transactions")
             .select()
@@ -300,24 +317,15 @@ class SupabaseManager: ObservableObject {
             .execute()
             .value
         
-        print("📦 Received \(response.count) transactions from Supabase")
+        SecureLogger.debug("Received \(response.count) transactions")
         
         var parsedCount = 0
         var failedCount = 0
         
         let transactions = response.compactMap { dto -> Transaction? in
-            // Debug: print first transaction details
-            if parsedCount == 0 && failedCount == 0 {
-                print("🔍 First transaction data:")
-                print("   - id: \(dto.id)")
-                print("   - date: \(dto.date)")
-                print("   - amount: \(dto.amount)")
-                print("   - category: \(dto.category)")
-            }
-            
             guard let uuid = UUID(uuidString: dto.id) else {
                 failedCount += 1
-                print("❌ Failed to parse UUID: \(dto.id)")
+                SecureLogger.error("Failed to parse UUID")
                 return nil
             }
             
@@ -336,7 +344,7 @@ class SupabaseManager: ObservableObject {
                     date = simpleDate
                 } else {
                     failedCount += 1
-                    print("❌ Failed to parse date: \(dto.date)")
+                    SecureLogger.error("Failed to parse date")
                     return nil
                 }
             }
@@ -372,8 +380,10 @@ class SupabaseManager: ObservableObject {
             )
         }
         
-        print("✅ Successfully parsed: \(parsedCount) transactions")
-        print("❌ Failed to parse: \(failedCount) transactions")
+        SecureLogger.info("Successfully parsed \(parsedCount) transactions")
+        if failedCount > 0 {
+            SecureLogger.warning("Failed to parse \(failedCount) transactions")
+        }
         
         return transactions
     }
@@ -470,12 +480,12 @@ class SupabaseManager: ObservableObject {
     private var realtimeChannel: RealtimeChannelV2?
     
     func startRealtimeSync(userId: String, onUpdate: @escaping () -> Void) {
-        print("🎧 Real-time sync disabled for now")
+        SecureLogger.debug("Real-time sync disabled for now")
         // TODO: Implement real-time sync properly
     }
     
     func stopRealtimeSync() {
-        print("🛑 Stopping real-time sync")
+        SecureLogger.debug("Stopping real-time sync")
         realtimeChannel = nil
     }
     
@@ -506,7 +516,7 @@ class SupabaseManager: ObservableObject {
                 .insert(data)
                 .execute()
         } catch {
-            print("⚠️ Failed to track event: \(error)")
+            SecureLogger.warning("Failed to track event")
         }
     }
     
@@ -526,8 +536,8 @@ class SupabaseManager: ObservableObject {
     /// شامل: transactions, budgets, category_budgets
     func deleteMonthData(userId: String, monthKey: String) async throws {
         let userIdLower = userId.lowercased()
-        
-        print("🗑️ Deleting month \(monthKey) from Supabase...")
+
+        SecureLogger.debug("Deleting month data from Supabase")
         
         // 1. حذف تراکنش‌های این ماه
         // date ها به فرمت ISO8601 هستن: "2026-03-15T..." پس با like فیلتر میکنیم
@@ -538,8 +548,8 @@ class SupabaseManager: ObservableObject {
             .eq("user_id", value: userIdLower)
             .like("date", pattern: "\(monthKey)%")
             .execute()
-        
-        print("  ✅ Deleted transactions for \(monthKey)")
+
+        SecureLogger.info("Deleted transactions")
         
         // 2. حذف بودجه کل این ماه
         try await client.database
@@ -548,8 +558,8 @@ class SupabaseManager: ObservableObject {
             .eq("user_id", value: userIdLower)
             .eq("month", value: monthKey)
             .execute()
-        
-        print("  ✅ Deleted budget for \(monthKey)")
+
+        SecureLogger.info("Deleted budget")
         
         // 3. حذف category budgets این ماه
         try await client.database
@@ -558,10 +568,9 @@ class SupabaseManager: ObservableObject {
             .eq("user_id", value: userIdLower)
             .eq("month", value: monthKey)
             .execute()
-        
-        print("  ✅ Deleted category budgets for \(monthKey)")
-        
-        print("🗑️ Month \(monthKey) fully deleted from Supabase")
+
+        SecureLogger.info("Deleted category budgets")
+        SecureLogger.info("Month data fully deleted")
     }
     
     // MARK: - Helpers
@@ -586,7 +595,7 @@ extension SupabaseManager {
         let userIdLower = userId.lowercased()
         let dateFormatter = ISO8601DateFormatter()
         
-        print("💾 Saving \(recurring.count) recurring transactions...")
+        SecureLogger.debug("Saving \(recurring.count) recurring transactions")
         
         // Get existing IDs from server
         struct IdDTO: Codable { let id: String }
@@ -639,7 +648,7 @@ extension SupabaseManager {
                 .execute()
         }
         
-        print("✅ Recurring transactions saved (\(recurring.count) upserted, \(deletedIds.count) deleted)")
+        SecureLogger.info("Recurring transactions saved (\(recurring.count) upserted, \(deletedIds.count) deleted)")
     }
     
     func loadRecurringTransactions(userId: String) async throws -> [RecurringTransaction] {
@@ -659,7 +668,7 @@ extension SupabaseManager {
             let note: String?
         }
         
-        print("📥 Loading recurring transactions...")
+        SecureLogger.debug("Loading recurring transactions")
         
         let response: [RecurringDTO] = try await client.database
             .from("recurring_transactions")
@@ -713,7 +722,7 @@ extension SupabaseManager {
         let results = response.compactMap { dto -> RecurringTransaction? in
             guard let uuid = UUID(uuidString: dto.id),
                   let startDate = parseDate(dto.start_date) else {
-                print("❌ Failed to parse recurring: \(dto.id)")
+                SecureLogger.error("Failed to parse recurring transaction")
                 return nil
             }
             
@@ -732,7 +741,7 @@ extension SupabaseManager {
             )
         }
         
-        print("✅ Loaded \(results.count) recurring transactions")
+        SecureLogger.info("Loaded \(results.count) recurring transactions")
         return results
     }
 }
@@ -742,33 +751,27 @@ extension SupabaseManager {
     
     /// Save custom categories to Supabase
     func saveCustomCategories(_ categories: [CustomCategoryModel], userId: String) async throws {
-        print("💾 Saving \(categories.count) custom categories...")
-        print("🔍 User ID: \(userId)")
-        print("🔍 Categories to save: \(categories)")
-        
+        SecureLogger.debug("Saving \(categories.count) custom categories")
+
         let jsonData = try JSONEncoder().encode(categories)
         let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
-        
-        print("🔍 JSON string to save: \(jsonString)")
         
         try await client
             .from("users")
             .update(["custom_categories": jsonString])
             .eq("id", value: userId)
             .execute()
-        
-        print("✅ Custom categories saved to Supabase")
-        
+
+        SecureLogger.info("Custom categories saved")
+
         // Verify it was saved
-        print("🔍 Verifying save...")
         let categories = try await loadCustomCategories(userId: userId)
-        print("🔍 Verified: \(categories.count) categories in database")
+        SecureLogger.debug("Verified: \(categories.count) categories in database")
     }
     
     /// Load custom categories from Supabase
     func loadCustomCategories(userId: String) async throws -> [CustomCategoryModel] {
-        print("📥 Loading custom categories...")
-        print("🔍 User ID: \(userId)")
+        SecureLogger.debug("Loading custom categories")
         
         // Try decoding as array first (if JSONB native)
         struct UserDataArray: Decodable {
@@ -788,19 +791,14 @@ extension SupabaseManager {
                 .eq("id", value: userId)
                 .execute()
                 .value
-            
-            print("🔍 Response count: \(response.count)")
-            print("🔍 Raw response: \(response)")
-            
+
             if let user = response.first,
                let categories = user.custom_categories {
-                print("✅ Loaded \(categories.count) custom categories (array format)")
-                print("🔍 Categories: \(categories)")
+                SecureLogger.info("Loaded \(categories.count) custom categories (array format)")
                 return categories
             }
         } catch {
-            print("⚠️ Not array format, error: \(error)")
-            print("⚠️ Trying string format...")
+            SecureLogger.debug("Not array format, trying string format")
             
             // Try string format
             do {
@@ -810,40 +808,35 @@ extension SupabaseManager {
                     .eq("id", value: userId)
                     .execute()
                     .value
-                
-                print("🔍 String response count: \(response.count)")
-                
+
                 if let user = response.first {
-                    print("🔍 Raw custom_categories value: \(user.custom_categories ?? "nil")")
-                    
                     if let jsonString = user.custom_categories,
                        !jsonString.isEmpty,
                        let jsonData = jsonString.data(using: .utf8) {
                         let categories = try JSONDecoder().decode([CustomCategoryModel].self, from: jsonData)
-                        print("✅ Loaded \(categories.count) custom categories (string format)")
-                        print("🔍 Categories: \(categories)")
+                        SecureLogger.info("Loaded \(categories.count) custom categories (string format)")
                         return categories
                     }
                 }
             } catch let stringError {
-                print("❌ String format also failed: \(stringError)")
-                
-                // ✅ Auto-reset to fix corrupted format
-                print("🔧 Auto-resetting custom_categories...")
+                SecureLogger.error("String format failed")
+
+                // Auto-reset to fix corrupted format
+                SecureLogger.warning("Auto-resetting custom_categories")
                 do {
                     try await client
                         .from("users")
                         .update(["custom_categories": "[]"])
                         .eq("id", value: userId)
                         .execute()
-                    print("✅ Reset complete")
+                    SecureLogger.info("Reset complete")
                 } catch {
-                    print("❌ Reset failed: \(error)")
+                    SecureLogger.error("Reset failed")
                 }
             }
         }
-        
-        print("✅ Returning empty array")
+
+        SecureLogger.debug("Returning empty array")
         return []
     }
 }

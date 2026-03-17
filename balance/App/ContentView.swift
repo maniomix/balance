@@ -19,6 +19,7 @@ struct ContentView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var supabaseManager: SupabaseManager
     @StateObject private var onboardingManager = OnboardingManager.shared
+    @StateObject private var syncCoordinator = SyncCoordinator.shared
     @Environment(\.scenePhase) private var scenePhase
 
     // Debounced smart-rule evaluation to prevent repeated scheduling/firing
@@ -30,152 +31,62 @@ struct ContentView: View {
 
     private let notifEvalDebounceSeconds: TimeInterval = 0.9
     
-    // Timer for periodic sync (every 2 minutes)
-    @State private var syncTimer: Timer?
-    
-    // Last sync time for banner
-    @State private var lastSyncTime: Date?
-    
     // MARK: - Helper Functions
     
-    /// Load user data from local and sync with cloud
+    /// Load user data from local storage, then sync from cloud in background.
+    /// Local data is loaded synchronously (fast) for instant UI.
+    /// Cloud sync follows asynchronously — on success, updates both local and in-memory state.
     private func loadUserData() {
         guard let userId = authManager.currentUser?.uid else {
-            print("❌ loadUserData: No user ID found!")
+            SecureLogger.warning("loadUserData: No user ID found")
             return
         }
-        
-        // Load subscription status
+
+        // Load ancillary data
         Task { await SubscriptionManager.shared.loadSubscription() }
-        
-        print("==================================================")
-        print("📥 Loading user data...")
-        print("👤 User ID: \(userId)")
-        print("==================================================")
-        
-        // 1. Load from local storage first (fast)
+        HouseholdManager.shared.load(userId: userId)
+
+        // 1. Load from local storage FIRST (fast, never fails)
         store = Store.load(userId: userId)
-        print("✅ Local data loaded:")
-        print("   - Transactions: \(store.transactions.count)")
-        print("   - Budgets: \(store.budgetsByMonth.count)")
-        print("   - Category Budgets: \(store.categoryBudgetsByMonth.count)")
-        
-        // 2. Sync from cloud (in background)
-        Task { try? await Task.sleep(nanoseconds: 100_000_000);
-            do {
-                print("🔄 Starting cloud sync...")
-                print("   - Querying Supabase with user_id: \(userId)")
-                
-                let cloudStore = try await supabaseManager.syncStore(store)
-                
-                print("✅ Cloud sync SUCCESS!")
-                print("   - Transactions received: \(cloudStore.transactions.count)")
-                print("   - Budgets received: \(cloudStore.budgetsByMonth.count)")
-                print("   - Category Budgets received: \(cloudStore.categoryBudgetsByMonth.count)")
-                
-                if cloudStore.transactions.isEmpty {
-                    print("⚠️ WARNING: No transactions received from Supabase!")
-                    print("   Possible reasons:")
-                    print("   1. user_id mismatch")
-                    print("   2. RLS policy blocking access")
-                    print("   3. No data in database")
-                }
-                
-                await MainActor.run {
-                    store = cloudStore
-                    // Save synced data locally
-                    store.save(userId: userId)
-                    print("💾 Synced data saved locally")
-                    print("==================================================")
-                }
-                
-            } catch {
-                print("❌ Cloud sync FAILED!")
-                print("   - Error: \(error)")
-                print("   - Error description: \(error.localizedDescription)")
-                print("==================================================")
+        SecureLogger.info("Local data loaded: \(store.transactions.count) transactions")
+
+        // 2. Sync from cloud in background
+        Task {
+            if let cloudStore = await syncCoordinator.pullFromCloud(localStore: store, userId: userId) {
+                store = cloudStore
+                store.save(userId: userId)
+                SecureLogger.info("Launch sync complete")
             }
         }
-        
-        // 3. Start periodic sync timer (every 2 minutes)
-        startPeriodicSync()
+
+        // 3. Start periodic sync via coordinator
+        syncCoordinator.startPeriodicSync(
+            getStore: { [self] in self.store },
+            setStore: { [self] newStore in self.store = newStore },
+            getUserId: { [self] in self.authManager.currentUser?.uid }
+        )
     }
-    
-    /// Start timer for periodic cloud sync
-    private func startPeriodicSync() {
-        // Cancel existing timer
-        syncTimer?.invalidate()
-        
-        // Create new timer (every 2 minutes)
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { _ in
-            guard let userId = authManager.currentUser?.uid else { return }
-            
-            Task { try? await Task.sleep(nanoseconds: 100_000_000);
-                do {
-                    print("⏰ Periodic sync...")
-                    let cloudStore = try await supabaseManager.syncStore(store)
-                    await MainActor.run {
-                        store = cloudStore
-                        store.save(userId: userId)
-                    }
-                    print("✅ Periodic sync complete")
-                } catch {
-                    print("❌ Periodic sync failed: \(error)")
-                }
-            }
-        }
-    }
-    
-    /// Stop periodic sync timer
-    private func stopPeriodicSync() {
-        syncTimer?.invalidate()
-        syncTimer = nil
-    }
-    
-    /// Manual sync triggered by user - uploads current data then syncs
+
+    /// Manual sync triggered by user — does full push + pull reconciliation.
     @MainActor
     private func manualSync() async {
         guard let userId = authManager.currentUser?.uid else {
-            print("❌ manualSync: No user ID found!")
+            SecureLogger.warning("manualSync: No user ID found")
             return
         }
-        
-        print("=================================================")
-        print("🔄 MANUAL SYNC started by user...")
-        print("=================================================")
-        
-        do {
-            // ✅ Pull from cloud (server is source of truth)
-            // Local changes are auto-pushed after each edit.
-            // Pushing stale local data here would overwrite deletions from other devices.
-            print("📥 Syncing from cloud...")
-            let cloudStore = try await supabaseManager.syncStore(store)
-            store = cloudStore
-            
-            // Save synced data locally
+
+        if let reconciled = await syncCoordinator.fullReconcile(store: store, userId: userId) {
+            store = reconciled
             store.save(userId: userId)
-            
-            print("✅ MANUAL SYNC completed successfully!")
-            print("   - Transactions: \(store.transactions.count)")
-            print("   - Budgets: \(store.budgetsByMonth.count)")
-            print("=================================================")
-            
             Haptics.success()
-            
-        } catch {
-            print("❌ MANUAL SYNC failed!")
-            print("   - Error: \(error)")
-            print("   - Description: \(error.localizedDescription)")
-            print("=================================================")
-            
+        } else {
             Haptics.error()
         }
     }
-    
-    /// Save store to local only
+
+    /// Save store to local only (UserDefaults).
     private func saveStore() {
         guard let userId = authManager.currentUser?.uid else { return }
-        // Save locally with user ID
         store.save(userId: userId)
     }
     
@@ -209,6 +120,7 @@ struct ContentView: View {
                     .onAppear {
                         // Load data when app appears (app startup)
                         loadUserData()
+                        AnalyticsManager.shared.startSession()
                     }
                 } else {
                     // User not logged in - show authentication
@@ -223,7 +135,7 @@ struct ContentView: View {
                     loadUserData()
                 } else {
                     // User logged out - clear data and stop sync
-                    stopPeriodicSync()
+                    syncCoordinator.stopPeriodicSync()
                     store = Store()
                 }
             }
@@ -269,13 +181,20 @@ struct ContentView: View {
                 .tabItem { Label("Subscriptions", systemImage: "creditcard.and.123") }
                 .tag(Tab.subscriptions)
 
+                NavigationStack {
+                    HouseholdOverviewView(store: $store)
+                }
+                .tabItem { Label("Household", systemImage: "person.2") }
+                .tag(Tab.household)
+
                 SettingsView(store: $store)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
             }
             .environmentObject(supabaseManager)
-            .onChange(of: selectedTab) { _, _ in
+            .onChange(of: selectedTab) { _, newTab in
                 Haptics.selection()
+                AnalyticsManager.shared.track(.tabSwitched(tab: "\(newTab)"))
             }
             } // Close VStack
             .onAppear {
@@ -306,47 +225,64 @@ struct ContentView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + notifEvalDebounceSeconds, execute: item)
                 }
 
-                // Regenerate forecast on data changes (debounced via Task)
+                // Regenerate engines in parallel for fast month switching
                 Task {
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    await ForecastEngine.shared.generate(store: newStore)
-                    await SubscriptionEngine.shared.analyze(store: newStore)
-                    await ReviewEngine.shared.analyze(store: newStore)
+                    async let f: () = ForecastEngine.shared.generate(store: newStore)
+                    async let s: () = SubscriptionEngine.shared.analyze(store: newStore)
+                    async let r: () = ReviewEngine.shared.analyze(store: newStore)
+                    _ = await (f, s, r)
+                    // Update widget data after engines finish
+                    await WidgetDataWriter.update(store: newStore)
                 }
             }
             // Save locally when the app is backgrounded
             .onChange(of: scenePhase) { _, phase in
                 if phase == .inactive || phase == .background {
                     saveStore()
+                    AnalyticsManager.shared.endSession()
+                    // Refresh widgets when leaving app
+                    Task { await WidgetDataWriter.update(store: store) }
+                } else if phase == .active {
+                    AnalyticsManager.shared.startSession()
                 }
             }
-            // Auto-sync to Firestore whenever store changes
+            // Handle widget deep links
+            .onOpenURL { url in
+                guard url.scheme == "centmond" else { return }
+                switch url.host {
+                case "dashboard":       selectedTab = .dashboard
+                case "budget":          selectedTab = .budget
+                case "subscriptions":   selectedTab = .subscriptions
+                case "forecast":        selectedTab = .insights
+                case "accounts":        selectedTab = .accounts
+                default: break
+                }
+            }
+            // Auto-sync to Supabase whenever store changes
             .onChange(of: store) { _, newStore in
+                // Save locally IMMEDIATELY (not debounced) so budget/data never gets lost
+                if let userId = authManager.currentUser?.uid {
+                    newStore.save(userId: userId)
+                }
+
+                // Cloud sync is debounced to avoid spamming the server
                 autoSyncTask?.cancel()
-                autoSyncTask = Task { try? await Task.sleep(nanoseconds: 100_000_000);
-                    // Debounce: wait 2 seconds before syncing
+                autoSyncTask = Task {
+                    // Debounce: wait 2 seconds before syncing to cloud
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    
+
                     guard !Task.isCancelled else { return }
                     guard let userId = authManager.currentUser?.uid else {
-                        print("⚠️ No user ID - skipping auto-sync")
+                        SecureLogger.debug("No user ID — skipping auto-sync")
                         return
                     }
-                    
-                    // Save locally first
-                    newStore.save(userId: userId)
-                    
-                    // Then sync to Supabase
-                    do {
-                        try await supabaseManager.saveStore(newStore)
-                        print("✅ Auto-synced to Supabase")
-                    } catch let error as NSError {
-                        print("❌ Auto-sync failed:")
-                        print("   Error code: \(error.code)")
-                        print("   Domain: \(error.domain)")
-                        print("   Description: \(error.localizedDescription)")
-                        if error.code == 7 {
-                            print("   ⚠️ Permission denied - check Firestore Rules")
+
+                    // Push to cloud via SyncCoordinator
+                    if let cleaned = await syncCoordinator.pushToCloud(store: newStore, userId: userId) {
+                        // If deletedTransactionIds were cleared, update local store
+                        if cleaned.deletedTransactionIds != newStore.deletedTransactionIds {
+                            store = cleaned
+                            cleaned.save(userId: userId)
                         }
                     }
                 }
@@ -356,25 +292,20 @@ struct ContentView: View {
         
             .task(id: authManager.isAuthenticated) {
                 if authManager.isAuthenticated, let userId = authManager.currentUser?.uid {
-                    // Sync when user logs in
-                    do {
-                        let syncedStore = try await supabaseManager.syncStore(store)
-                        store = syncedStore
-                        saveStore() // Save with userId
-                        
-                        lastSyncTime = Date() // ✅ Update sync time
-                        
-                        // Start real-time listener for auto-sync from other devices
-                        supabaseManager.startRealtimeSync(userId: userId) {
-                            // Real-time sync callback
-                            print("📱 Real-time sync triggered")
-                        }
-                    } catch {
-                        print("Sync error: \(error)")
+                    // Sync when user logs in via SyncCoordinator
+                    if let cloudStore = await syncCoordinator.pullFromCloud(localStore: store, userId: userId) {
+                        store = cloudStore
+                        saveStore()
+                    }
+
+                    // Start real-time listener for auto-sync from other devices
+                    supabaseManager.startRealtimeSync(userId: userId) {
+                        SecureLogger.debug("Real-time sync triggered")
                     }
                 } else {
-                    // User logged out - stop listener and reset store
+                    // User logged out — stop listeners, periodic sync, and reset store
                     supabaseManager.stopRealtimeSync()
+                    syncCoordinator.stopPeriodicSync()
                     store = Store()
                     showLaunchScreen = true
                 }
@@ -389,7 +320,7 @@ struct ContentView: View {
     }
 }
 
-enum Tab: Hashable { case dashboard, transactions, budget, insights, accounts, goals, subscriptions, settings }
+enum Tab: Hashable { case dashboard, transactions, budget, insights, accounts, goals, subscriptions, household, settings }
 // Shared category list used across views
 private var categories: [Category] { Category.allCases }
 
@@ -834,16 +765,17 @@ private struct DashboardView: View {
                         SetupCard(goToBudget: goToBudget)
                     } else {
                         kpis
-                        ReviewDashboardCard(store: $store)
+                        trendCard
                         SafeToSpendCard()
                         ForecastDashboardCard()
-                        trendCard
                         categoryCard
-                        paymentBreakdownCard
-                        advisorInsightsCard
+                        ReviewDashboardCard(store: $store)
                         NetWorthDashboardCard()
                         GoalsDashboardCard()
                         SubscriptionsDashboardCard()
+                        HouseholdDashboardCard(store: $store)
+                        paymentBreakdownCard
+                        advisorInsightsCard
                     }
                 }
                 .padding(.horizontal, 16)
@@ -902,16 +834,14 @@ private struct DashboardView: View {
             }
         }
         .onAppear {
-            // Load subscription status when dashboard appears
-            if let userId = authManager.currentUser?.uid {
-                Task { try? await Task.sleep(nanoseconds: 100_000_000);
-                }
-            }
-            // Generate forecast
+            AnalyticsManager.shared.track(.dashboardViewed)
+            // Generate engines in parallel on appear
             Task {
-                await ForecastEngine.shared.generate(store: store)
-                await SubscriptionEngine.shared.analyze(store: store)
-                await ReviewEngine.shared.analyze(store: store)
+                async let f: () = ForecastEngine.shared.generate(store: store)
+                async let s: () = SubscriptionEngine.shared.analyze(store: store)
+                async let r: () = ReviewEngine.shared.analyze(store: store)
+                _ = await (f, s, r)
+                await WidgetDataWriter.update(store: store)
             }
         }
         .alert("Delete This Month", isPresented: $showDeleteMonthConfirm) {
@@ -1665,8 +1595,9 @@ private struct TransactionsView: View {
             out = out.filter { $0.note.lowercased().contains(s) || $0.category.title.lowercased().contains(s) }
         }
 
-        // Category filter
-        if selectedCategories.count != store.allCategories.count {
+        // Category filter — only apply when user has actively chosen a subset.
+        // Empty set means "no filter active" (show all), not "show nothing".
+        if !selectedCategories.isEmpty && selectedCategories.count != store.allCategories.count {
             out = out.filter { selectedCategories.contains($0.category) }
         }
         
@@ -2158,6 +2089,7 @@ private struct TransactionsView: View {
                   let tx = store.transactions.first(where: { $0.id == id }) else { return }
 
             Haptics.transactionDeleted()  // ← هاپتیک
+            AnalyticsManager.shared.track(.transactionDeleted)
             pendingUndo = [tx]
             withAnimation(uiAnim) {
                 // Track deleted ID for sync
@@ -2793,6 +2725,8 @@ private struct BudgetView: View {
                                     store.budgetTotal = max(0, v)
                                     focus = false  // Dismiss keyboard
                                     Haptics.success()
+                                    AnalyticsManager.shared.track(.budgetSet)
+                                    AnalyticsManager.shared.checkFirstBudget()
                                 }
                                 .buttonStyle(DS.PrimaryButton())
                                 .frame(width: 140)
@@ -3730,6 +3664,7 @@ private struct InsightsView: View {
 
             try data.write(to: url, options: .atomic)
             Haptics.exportSuccess()
+            AnalyticsManager.shared.track(.exportUsed(format: format.fileExtension))
             self.shareURL = url
         } catch {
             Haptics.error()  // ← هاپتیک خطا
@@ -5869,8 +5804,9 @@ private struct MonthPicker: View {
     var body: some View {
         HStack(spacing: 8) {
             Button {
-                Haptics.monthChanged()  // ← هاپتیک مخصوص
+                Haptics.monthChanged()
                 selectedMonth = Calendar.current.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
+                AnalyticsManager.shared.track(.monthSwitched)
             } label: {
                 Image(systemName: "chevron.left")
                     .foregroundStyle(DS.Colors.subtext)
@@ -5879,8 +5815,9 @@ private struct MonthPicker: View {
             }
 
             Button {
-                Haptics.soft()  // ← light بجای soft
+                Haptics.soft()
                 selectedMonth = Date()
+                AnalyticsManager.shared.track(.monthSwitched)
             } label: {
                 Text("This month")
                     .font(DS.Typography.caption)
@@ -5900,6 +5837,7 @@ private struct MonthPicker: View {
             Button {
                 Haptics.monthChanged()  // ← هاپتیک مخصوص
                 selectedMonth = Calendar.current.date(byAdding: .month, value: 1, to: selectedMonth) ?? selectedMonth
+                AnalyticsManager.shared.track(.monthSwitched)
             } label: {
                 Image(systemName: "chevron.right")
                     .foregroundStyle(DS.Colors.subtext)
@@ -6471,6 +6409,8 @@ struct AddTransactionSheet: View {
             ))
         }
         Haptics.transactionAdded()
+        AnalyticsManager.shared.track(.transactionAdded(isExpense: transactionType == .expense))
+        AnalyticsManager.shared.checkFirstTransaction()
         dismiss()
     }
 }
@@ -6708,6 +6648,7 @@ private struct EditTransactionSheet: View {
             )
         }
         Haptics.success()
+        AnalyticsManager.shared.track(.transactionEdited)
         dismiss()
     }
 }
@@ -9791,6 +9732,7 @@ private struct ImportTransactionsScreen: View {
         }
         
         Haptics.importSuccess()  // ← استفاده از haptic مخصوص import
+        AnalyticsManager.shared.track(.csvImported(count: added))
         statusText = "Imported \(added) new transaction(s). Skipped \(skipped). Duplicates skipped: \(dupesFound)."
     }
 

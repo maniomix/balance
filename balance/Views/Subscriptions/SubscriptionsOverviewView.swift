@@ -58,6 +58,7 @@ struct SubscriptionsOverviewView: View {
             }
             .navigationTitle("Subscriptions")
             .navigationBarTitleDisplayMode(.large)
+            .trackScreen("subscriptions")
         }
     }
 

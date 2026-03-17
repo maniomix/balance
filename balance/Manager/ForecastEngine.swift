@@ -57,66 +57,113 @@ class ForecastEngine: ObservableObject {
 
     /// All calculations happen here. Pure function, no side effects.
     /// activeGoals is passed in to avoid @MainActor access from background.
+    /// Uses store.selectedMonth as the reference month so results change
+    /// when the user navigates between months.
     nonisolated static func compute(store: Store, activeGoals: [Goal]) -> ForecastResult {
         let cal = Calendar.current
-        let today = Date()
+        let realToday = Date()
+        let selectedMonth = store.selectedMonth
 
-        // ─── Step 1: Gather historical data (last 3 full months) ───
+        // Is the selected month the current real month?
+        let isCurrentMonth = cal.isDate(realToday, equalTo: selectedMonth, toGranularity: .month)
+        // Is the selected month in the past?
+        let isPastMonth: Bool = {
+            let selComps = cal.dateComponents([.year, .month], from: selectedMonth)
+            let nowComps = cal.dateComponents([.year, .month], from: realToday)
+            if let sy = selComps.year, let sm = selComps.month,
+               let ny = nowComps.year, let nm = nowComps.month {
+                return (sy * 12 + sm) < (ny * 12 + nm)
+            }
+            return false
+        }()
 
-        let threeMonthsAgo = cal.date(byAdding: .month, value: -3, to: today)!
-        let pastTransactions = store.transactions.filter { $0.date < today && $0.date >= threeMonthsAgo }
-
-        // Monthly averages (only from full months, exclude current month)
-        let fullMonthTx = pastTransactions.filter {
-            !cal.isDate($0.date, equalTo: today, toGranularity: .month)
+        // Reference date: for current month use today, for past month use end of that month,
+        // for future month use start of that month
+        let referenceDate: Date
+        if isCurrentMonth {
+            referenceDate = realToday
+        } else if isPastMonth {
+            // Last day of the selected month
+            let startOfNextMonth = cal.date(byAdding: .month, value: 1,
+                to: cal.date(from: cal.dateComponents([.year, .month], from: selectedMonth))!)!
+            referenceDate = cal.date(byAdding: .day, value: -1, to: startOfNextMonth)!
+        } else {
+            // Future month: first day of that month
+            referenceDate = cal.date(from: cal.dateComponents([.year, .month], from: selectedMonth))!
         }
 
-        let monthsOfData = countDistinctMonths(transactions: fullMonthTx, cal: cal)
+        // ─── Step 1: Gather historical data (3 months before the selected month) ───
+
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: selectedMonth))!
+        let threeMonthsAgo = cal.date(byAdding: .month, value: -3, to: monthStart)!
+        let pastTransactions = store.transactions.filter { $0.date < monthStart && $0.date >= threeMonthsAgo }
+
+        let monthsOfData = countDistinctMonths(transactions: pastTransactions, cal: cal)
         let divisor = max(1, monthsOfData)
 
-        let totalExpenses3m = fullMonthTx
+        let totalExpenses3m = pastTransactions
             .filter { $0.type == .expense }
             .reduce(0) { $0 + $1.amount }
 
-        let totalIncome3m = fullMonthTx
+        let totalIncome3m = pastTransactions
             .filter { $0.type == .income }
             .reduce(0) { $0 + $1.amount }
 
         let avgMonthlyExpense = totalExpenses3m / divisor
         let avgMonthlyIncome = totalIncome3m / divisor
 
-        // Average daily expense (for current month projection)
+        // Average daily expense (for projection)
         let avgDailyExpense = avgMonthlyExpense / 30
 
-        // ─── Step 2: Current month state ───
+        // ─── Step 2: Selected month state ───
 
-        let currentMonthTx = store.transactions.filter {
-            cal.isDate($0.date, equalTo: today, toGranularity: .month)
+        let selectedMonthTx = store.transactions.filter {
+            cal.isDate($0.date, equalTo: selectedMonth, toGranularity: .month)
         }
 
-        let spentThisMonth = currentMonthTx
+        let spentThisMonth = selectedMonthTx
             .filter { $0.type == .expense }
             .reduce(0) { $0 + $1.amount }
 
-        let incomeThisMonth = currentMonthTx
+        let incomeThisMonth = selectedMonthTx
             .filter { $0.type == .income }
             .reduce(0) { $0 + $1.amount }
 
-        let daysInMonth = cal.range(of: .day, in: .month, for: today)?.count ?? 30
-        let dayOfMonth = cal.component(.day, from: today)
-        let daysRemaining = max(0, daysInMonth - dayOfMonth)
+        let daysInMonth = cal.range(of: .day, in: .month, for: selectedMonth)?.count ?? 30
 
-        // Current month daily average (actual)
+        // Day of month and days remaining depend on whether this is current/past/future
+        let dayOfMonth: Int
+        let daysRemaining: Int
+
+        if isCurrentMonth {
+            dayOfMonth = cal.component(.day, from: realToday)
+            daysRemaining = max(0, daysInMonth - dayOfMonth)
+        } else if isPastMonth {
+            // Past month: fully elapsed
+            dayOfMonth = daysInMonth
+            daysRemaining = 0
+        } else {
+            // Future month: nothing elapsed yet
+            dayOfMonth = 0
+            daysRemaining = daysInMonth
+        }
+
+        // Daily average spend (actual)
         let actualDailySpend = dayOfMonth > 0 ? spentThisMonth / dayOfMonth : 0
 
-        // Use actual pace if we have enough data (7+ days), else use historical
-        let projectionDailyRate = dayOfMonth >= 7 ? actualDailySpend : avgDailyExpense
+        // Use actual pace if we have enough data (7+ days in current month), else historical
+        let projectionDailyRate: Int
+        if isCurrentMonth && dayOfMonth >= 7 {
+            projectionDailyRate = actualDailySpend
+        } else {
+            projectionDailyRate = avgDailyExpense
+        }
 
         // ─── Step 3: Recurring transactions forecast ───
 
         let recurringExpenses = computeRecurringExpenses(
             recurring: store.recurringTransactions,
-            from: today,
+            from: referenceDate,
             days: 90,
             cal: cal
         )
@@ -133,31 +180,47 @@ class ForecastEngine: ObservableObject {
             goal.requiredMonthlySaving
         }.reduce(0, +)
 
-        // ─── Step 5: Projected end-of-month balance ───
+        // ─── Step 5: Budget for selected month ───
 
-        let budget = store.budgetTotal
-        let projectedMonthSpend = spentThisMonth + (projectionDailyRate * daysRemaining)
+        let budget = store.budget(for: selectedMonth)
+
+        // ─── Step 5b: Projected end-of-month balance ───
+
+        let projectedMonthSpend: Int
+        if isPastMonth {
+            // Past month: actual spending IS the total
+            projectedMonthSpend = spentThisMonth
+        } else {
+            projectedMonthSpend = spentThisMonth + (projectionDailyRate * daysRemaining)
+        }
         let projectedMonthEnd = budget + incomeThisMonth - projectedMonthSpend
 
         // ─── Step 6: 30/60/90 day projections ───
 
-        // Monthly net = income - expenses - recurring - goal contributions
         let monthlyNet = avgMonthlyIncome - avgMonthlyExpense - monthlyGoalContributions
-
-        // Starting balance = current budget remaining for this month
         let currentRemaining = budget + incomeThisMonth - spentThisMonth
 
-        // 30-day projection: finish this month + whatever portion of next month
-        let daysInto30 = max(0, 30 - daysRemaining)
-        let proj30 = currentRemaining
-            - (projectionDailyRate * daysRemaining)    // rest of this month
-            - (avgDailyExpense * daysInto30)            // into next month
-            + (avgMonthlyIncome * daysInto30 / 30)      // partial next month income
-            - next30Recurring                            // recurring in next 30 days
-            + (daysRemaining > 0 ? 0 : avgMonthlyIncome) // full next month income if month ended
+        let proj30: Int
+        let proj60: Int
+        let proj90: Int
 
-        let proj60 = proj30 + monthlyNet - next60Recurring + next30Recurring
-        let proj90 = proj60 + monthlyNet - next90Recurring + next60Recurring
+        if isPastMonth {
+            // Past month: no future projections, show actuals
+            proj30 = currentRemaining
+            proj60 = currentRemaining
+            proj90 = currentRemaining
+        } else {
+            let daysInto30 = max(0, 30 - daysRemaining)
+            proj30 = currentRemaining
+                - (projectionDailyRate * daysRemaining)
+                - (avgDailyExpense * daysInto30)
+                + (avgMonthlyIncome * daysInto30 / 30)
+                - next30Recurring
+                + (daysRemaining > 0 ? 0 : avgMonthlyIncome)
+
+            proj60 = proj30 + monthlyNet - next60Recurring + next30Recurring
+            proj90 = proj60 + monthlyNet - next90Recurring + next60Recurring
+        }
 
         // ─── Step 7: Safe to spend ───
 
@@ -176,24 +239,37 @@ class ForecastEngine: ObservableObject {
             projectedMonthEnd: projectedMonthEnd,
             budget: budget,
             spentRatio: budget > 0 ? Double(spentThisMonth) / Double(budget) : 0,
-            dayRatio: Double(dayOfMonth) / Double(daysInMonth)
+            dayRatio: daysInMonth > 0 ? Double(dayOfMonth) / Double(daysInMonth) : 0
         )
 
         // ─── Step 9: Timeline (daily projections for chart) ───
 
-        let timeline = computeTimeline(
-            startBalance: currentRemaining,
-            dailyExpense: projectionDailyRate,
-            avgDailyIncome: avgMonthlyIncome / 30,
-            recurring: store.recurringTransactions,
-            days: 30,
-            cal: cal
-        )
+        let timeline: [ForecastPoint]
+        if isPastMonth {
+            // Past month: build timeline from actual daily spending
+            timeline = computePastTimeline(
+                transactions: selectedMonthTx,
+                budget: budget,
+                incomeThisMonth: incomeThisMonth,
+                selectedMonth: selectedMonth,
+                cal: cal
+            )
+        } else {
+            timeline = computeTimeline(
+                startBalance: currentRemaining,
+                dailyExpense: projectionDailyRate,
+                avgDailyIncome: avgMonthlyIncome / 30,
+                recurring: store.recurringTransactions,
+                days: isCurrentMonth ? 30 : daysInMonth,
+                startDate: referenceDate,
+                cal: cal
+            )
+        }
 
         // ─── Step 10: Spending breakdown ───
 
         let spendingByCategory = computeCategoryBreakdown(
-            transactions: currentMonthTx.filter { $0.type == .expense }
+            transactions: selectedMonthTx.filter { $0.type == .expense }
         )
 
         return ForecastResult(
@@ -235,7 +311,7 @@ class ForecastEngine: ObservableObject {
             // Breakdown
             topCategories: spendingByCategory,
 
-            generatedAt: today
+            generatedAt: realToday
         )
     }
 
@@ -350,13 +426,9 @@ class ForecastEngine: ObservableObject {
         budget: Int
     ) -> SafeToSpend {
 
-        // Upcoming bills due within this month
-        let cal = Calendar.current
-        let now = Date()
-        let endOfMonth = cal.date(byAdding: .month, value: 1, to: cal.startOfDay(for: now))!
-
+        // Upcoming bills due within the remaining days
         let billsThisMonth = upcomingBills
-            .filter { $0.dueDate < endOfMonth }
+            .prefix(20) // already filtered in computeRecurringExpenses
             .reduce(0) { $0 + $1.amount }
 
         // Goal contributions remaining for this month (assume not yet contributed)
@@ -423,15 +495,15 @@ class ForecastEngine: ObservableObject {
         avgDailyIncome: Int,
         recurring: [RecurringTransaction],
         days: Int,
+        startDate: Date,
         cal: Calendar
     ) -> [ForecastPoint] {
 
-        let today = Date()
         var points: [ForecastPoint] = []
         var balance = startBalance
 
         for i in 0..<days {
-            guard let date = cal.date(byAdding: .day, value: i, to: today) else { continue }
+            guard let date = cal.date(byAdding: .day, value: i, to: startDate) else { continue }
 
             // Check for recurring transaction on this day
             var recurringHit = 0
@@ -451,6 +523,52 @@ class ForecastEngine: ObservableObject {
                 date: date,
                 balance: balance,
                 dayIndex: i
+            ))
+        }
+
+        return points
+    }
+
+    /// Build a timeline from actual transactions for a past (completed) month.
+    /// Shows how the balance changed day by day based on real data.
+    nonisolated private static func computePastTimeline(
+        transactions: [Transaction],
+        budget: Int,
+        incomeThisMonth: Int,
+        selectedMonth: Date,
+        cal: Calendar
+    ) -> [ForecastPoint] {
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: selectedMonth))!
+        let daysInMonth = cal.range(of: .day, in: .month, for: selectedMonth)?.count ?? 30
+
+        // Group spending by day
+        var dailyExpense: [Int: Int] = [:]   // day number -> total expense
+        var dailyIncome: [Int: Int] = [:]    // day number -> total income
+        for tx in transactions {
+            let day = cal.component(.day, from: tx.date)
+            if tx.type == .expense {
+                dailyExpense[day, default: 0] += tx.amount
+            } else {
+                dailyIncome[day, default: 0] += tx.amount
+            }
+        }
+
+        var points: [ForecastPoint] = []
+        var balance = budget + incomeThisMonth // start with full budget
+        // Actually compute running balance: budget - cumulative spending + cumulative income
+        var cumulativeSpent = 0
+        var cumulativeIncome = 0
+
+        for day in 1...daysInMonth {
+            cumulativeSpent += dailyExpense[day] ?? 0
+            cumulativeIncome += dailyIncome[day] ?? 0
+            balance = budget + cumulativeIncome - cumulativeSpent
+
+            guard let date = cal.date(byAdding: .day, value: day - 1, to: monthStart) else { continue }
+            points.append(ForecastPoint(
+                date: date,
+                balance: balance,
+                dayIndex: day - 1
             ))
         }
 

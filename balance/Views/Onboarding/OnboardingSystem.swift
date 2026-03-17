@@ -18,6 +18,7 @@ class OnboardingManager: ObservableObject {
         currentStep = 0
         showOnboarding = true
         highlightedFeature = OnboardingFeature.allSteps.first
+        AnalyticsManager.shared.track(.onboardingStarted)
     }
     
     func nextStep() {
@@ -26,10 +27,13 @@ class OnboardingManager: ObservableObject {
             completeOnboarding()
         } else {
             highlightedFeature = OnboardingFeature.allSteps[currentStep]
+            AnalyticsManager.shared.track(.onboardingStepViewed(step: highlightedFeature?.rawValue ?? "unknown"))
         }
     }
     
     func skipOnboarding() {
+        let stepName = (currentStep < OnboardingFeature.allSteps.count) ? OnboardingFeature.allSteps[currentStep].rawValue : "unknown"
+        AnalyticsManager.shared.track(.onboardingSkipped(atStep: stepName))
         completeOnboarding()
     }
     
@@ -37,6 +41,7 @@ class OnboardingManager: ObservableObject {
         hasCompletedOnboarding = true
         showOnboarding = false
         highlightedFeature = nil
+        AnalyticsManager.shared.track(.onboardingCompleted(stepsCount: OnboardingFeature.allSteps.count))
     }
     
     func resetOnboarding() {

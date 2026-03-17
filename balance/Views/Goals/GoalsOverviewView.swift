@@ -117,6 +117,7 @@ struct GoalsOverviewView: View {
         .background(DS.Colors.bg.ignoresSafeArea())
         .navigationTitle("Goals")
         .navigationBarTitleDisplayMode(.inline)
+        .trackScreen("goals")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
