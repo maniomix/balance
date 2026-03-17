@@ -8,6 +8,7 @@ struct SubscriptionsOverviewView: View {
     @StateObject private var engine = SubscriptionEngine.shared
     @State private var filterStatus: SubscriptionStatus? = nil
     @State private var sortOption: SortOption = .cost
+    // Manual add navigates user to Recurring (in Transactions)
 
     enum SortOption: String, CaseIterable {
         case cost = "Cost"
@@ -42,6 +43,7 @@ struct SubscriptionsOverviewView: View {
                     ScrollView {
                         VStack(spacing: 16) {
                             summaryCard
+                            manualAddHint
                             insightBanners
                             filterBar
                             renewalCalendarSection
@@ -136,6 +138,57 @@ struct SubscriptionsOverviewView: View {
             (count > 0 ? color : DS.Colors.subtext).opacity(0.08),
             in: Capsule()
         )
+    }
+
+    // MARK: - Manual Add Hint
+
+    private var manualAddHint: some View {
+        let isPro = SubscriptionManager.shared.isPro
+
+        return HStack(spacing: 10) {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(DS.Colors.accent)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("For adding Subscriptions manually :")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Colors.text)
+
+                if isPro {
+                    Text("Go to Transactions → Recurring to add custom subscriptions")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(DS.Colors.subtext)
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(DS.Colors.positive)
+                        Text("Subscription Auto-detection is free")
+                            .foregroundStyle(DS.Colors.positive)
+                    }
+                    .font(.system(size: 10, weight: .medium))
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(DS.Colors.warning)
+                        Text("Manual entry requires Pro (via Recurring)")
+                            .foregroundStyle(DS.Colors.subtext)
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                }
+            }
+
+            Spacer()
+        }
+        .padding(12)
+        .background(DS.Colors.accent.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(DS.Colors.accent.opacity(0.15), lineWidth: 1)
+        )
+        .padding(.horizontal)
     }
 
     // MARK: - Insight Banners

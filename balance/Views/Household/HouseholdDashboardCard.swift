@@ -1,11 +1,7 @@
 import SwiftUI
 
 // ============================================================
-// MARK: - Household Dashboard Card (Phase 5 Redesign)
-// ============================================================
-// Rich card showing: balance, shared budget, shared goals,
-// pending settlements, and actionable alerts — so users can
-// understand household status without opening the section.
+// MARK: - Household Dashboard Card (v3 — Modern)
 // ============================================================
 
 struct HouseholdDashboardCard: View {
@@ -28,28 +24,208 @@ struct HouseholdDashboardCard: View {
                 Haptics.light()
                 showHousehold = true
             } label: {
-                DS.Card {
-                    VStack(alignment: .leading, spacing: 12) {
-                        // Header row
-                        headerRow(h, snapshot: snapshot)
+                VStack(alignment: .leading, spacing: 0) {
 
-                        // Balance + shared spending
-                        balanceRow(h, snapshot: snapshot)
+                    // ── Top: icon + name + avatars ──
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(DS.Colors.accent)
+                            .frame(width: 34, height: 34)
+                            .background(DS.Colors.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                        // Shared budget utilization (if set)
-                        if let util = snapshot.budgetUtilization, snapshot.sharedBudget > 0 {
-                            budgetBar(utilization: util, budget: snapshot.sharedBudget, spent: snapshot.sharedSpending, isOver: snapshot.isOverBudget)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(h.name)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(DS.Colors.text)
+
+                            // Status line
+                            if snapshot.hasPartner {
+                                Text("\(snapshot.memberCount) members")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(DS.Colors.subtext)
+                            } else {
+                                Text("Invite a partner to start sharing")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(DS.Colors.accent)
+                            }
                         }
 
-                        // Shared goals (top goal progress)
-                        if let goal = snapshot.topGoal {
-                            sharedGoalRow(goal, totalCount: snapshot.activeSharedGoalCount)
+                        Spacer()
+
+                        // Avatars
+                        HStack(spacing: -5) {
+                            ForEach(h.members.prefix(3)) { member in
+                                Text(String(member.displayName.prefix(1)).uppercased())
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 24, height: 24)
+                                    .background(
+                                        member.role == .owner ? DS.Colors.accent : DS.Colors.positive,
+                                        in: Circle()
+                                    )
+                                    .overlay(Circle().stroke(DS.Colors.surface, lineWidth: 1.5))
+                            }
                         }
 
-                        // Actionable alerts
-                        alertsRow(snapshot)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(DS.Colors.subtext.opacity(0.4))
+                    }
+                    .padding(14)
+
+                    // ── Bottom: only show if there's content ──
+                    if hasBottomContent(h, snapshot: snapshot) {
+                        Rectangle()
+                            .fill(DS.Colors.grid.opacity(0.5))
+                            .frame(height: 0.5)
+                            .padding(.horizontal, 14)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            // Balance
+                            if let partner = h.partner, let owner = h.owner {
+                                let otherUser = currentUserId == owner.userId ? partner : owner
+                                let balance = manager.netBalance(fromUser: currentUserId, toUser: otherUser.userId)
+
+                                HStack {
+                                    if balance > 0 {
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text("You owe \(otherUser.displayName)")
+                                                .font(.system(size: 10, weight: .medium))
+                                                .foregroundStyle(DS.Colors.subtext)
+                                            Text(DS.Format.money(balance))
+                                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                                .foregroundStyle(DS.Colors.danger)
+                                        }
+                                    } else if balance < 0 {
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text("\(otherUser.displayName) owes you")
+                                                .font(.system(size: 10, weight: .medium))
+                                                .foregroundStyle(DS.Colors.subtext)
+                                            Text(DS.Format.money(abs(balance)))
+                                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                                .foregroundStyle(DS.Colors.positive)
+                                        }
+                                    } else {
+                                        HStack(spacing: 5) {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(DS.Colors.positive)
+                                            Text("All settled")
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(DS.Colors.positive)
+                                        }
+                                    }
+
+                                    Spacer()
+
+                                    if snapshot.sharedSpending > 0 {
+                                        VStack(alignment: .trailing, spacing: 1) {
+                                            Text(DS.Format.money(snapshot.sharedSpending))
+                                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                                .foregroundStyle(DS.Colors.text)
+                                            Text("shared")
+                                                .font(.system(size: 9, weight: .medium))
+                                                .foregroundStyle(DS.Colors.subtext)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Budget
+                            if let util = snapshot.budgetUtilization, snapshot.sharedBudget > 0 {
+                                HStack(spacing: 8) {
+                                    Text("Budget")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(DS.Colors.subtext)
+                                        .frame(width: 40, alignment: .leading)
+
+                                    GeometryReader { geo in
+                                        ZStack(alignment: .leading) {
+                                            Capsule().fill(DS.Colors.surface2)
+                                            Capsule()
+                                                .fill(snapshot.isOverBudget ? DS.Colors.danger : DS.Colors.accent)
+                                                .frame(width: geo.size.width * min(1.0, CGFloat(util)))
+                                        }
+                                    }
+                                    .frame(height: 4)
+
+                                    Text("\(DS.Format.money(snapshot.sharedSpending))/\(DS.Format.money(snapshot.sharedBudget))")
+                                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                                        .foregroundStyle(snapshot.isOverBudget ? DS.Colors.danger : DS.Colors.subtext)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.7)
+                                }
+                            }
+
+                            // Goal
+                            if let goal = snapshot.topGoal {
+                                HStack(spacing: 8) {
+                                    Image(systemName: goal.icon)
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(DS.Colors.accent)
+                                        .frame(width: 18, height: 18)
+                                        .background(DS.Colors.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+                                    Text(goal.name)
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(DS.Colors.text)
+                                        .lineLimit(1)
+
+                                    Spacer()
+
+                                    Text("\(goal.progressPercent)%")
+                                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                                        .foregroundStyle(goal.progress >= 0.75 ? DS.Colors.positive : DS.Colors.accent)
+
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(DS.Colors.surface2).frame(width: 30, height: 3)
+                                        Capsule()
+                                            .fill(goal.progress >= 0.75 ? DS.Colors.positive : DS.Colors.accent)
+                                            .frame(width: 30 * min(1.0, CGFloat(goal.progress)), height: 3)
+                                    }
+
+                                    if snapshot.activeSharedGoalCount > 1 {
+                                        Text("+\(snapshot.activeSharedGoalCount - 1)")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundStyle(DS.Colors.subtext)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2)
+                                            .background(DS.Colors.surface2, in: Capsule())
+                                    }
+                                }
+                            }
+
+                            // Alerts
+                            let alerts = buildAlerts(snapshot)
+                            if !alerts.isEmpty {
+                                HStack(spacing: 6) {
+                                    ForEach(alerts.prefix(2), id: \.text) { alert in
+                                        HStack(spacing: 3) {
+                                            Image(systemName: alert.icon)
+                                                .font(.system(size: 8))
+                                            Text(alert.text)
+                                                .font(.system(size: 9, weight: .semibold))
+                                                .lineLimit(1)
+                                        }
+                                        .foregroundStyle(alert.color)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(alert.color.opacity(0.08), in: Capsule())
+                                    }
+                                    Spacer()
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
                     }
                 }
+                .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(DS.Colors.grid, lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
             .sheet(isPresented: $showHousehold) {
@@ -60,188 +236,17 @@ struct HouseholdDashboardCard: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Bottom Content Check
 
-    private func headerRow(_ h: Household, snapshot: HouseholdSnapshot) -> some View {
-        HStack {
-            Label(h.name, systemImage: "person.2.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(DS.Colors.accent)
-
-            Spacer()
-
-            // Member avatars
-            HStack(spacing: -6) {
-                ForEach(h.members.prefix(3)) { member in
-                    ZStack {
-                        Circle()
-                            .fill(member.role == .owner ? DS.Colors.accent : DS.Colors.positive)
-                            .frame(width: 20, height: 20)
-
-                        Text(String(member.displayName.prefix(1)).uppercased())
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
-
-            if snapshot.pendingInviteCount > 0 {
-                tagPill("\(snapshot.pendingInviteCount) invite", DS.Colors.accent)
-            } else if !snapshot.hasPartner {
-                tagPill("solo", DS.Colors.subtext)
-            }
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(DS.Colors.subtext.opacity(0.3))
-        }
-    }
-
-    // MARK: - Balance Row
-
-    private func balanceRow(_ h: Household, snapshot: HouseholdSnapshot) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            // Net balance
-            if let partner = h.partner, let owner = h.owner {
-                let otherUser = currentUserId == owner.userId ? partner : owner
-                let balance = manager.netBalance(fromUser: currentUserId, toUser: otherUser.userId)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    if balance > 0 {
-                        Text("You owe \(otherUser.displayName)")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(DS.Colors.subtext)
-                        Text(DS.Format.money(balance))
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                            .foregroundStyle(DS.Colors.danger)
-                    } else if balance < 0 {
-                        Text("\(otherUser.displayName) owes you")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(DS.Colors.subtext)
-                        Text(DS.Format.money(abs(balance)))
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                            .foregroundStyle(DS.Colors.positive)
-                    } else {
-                        Text("All settled!")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DS.Colors.positive)
-                    }
-                }
-            } else {
-                Label("Invite your partner", systemImage: "person.badge.plus")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(DS.Colors.accent)
-            }
-
-            Spacer()
-
-            // Shared spending this month
-            if snapshot.sharedSpending > 0 {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(DS.Format.money(snapshot.sharedSpending))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(DS.Colors.text)
-                    Text("shared this month")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(DS.Colors.subtext)
-                }
-            }
-        }
-    }
-
-    // MARK: - Budget Bar
-
-    private func budgetBar(utilization: Double, budget: Int, spent: Int, isOver: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Shared Budget")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(DS.Colors.subtext)
-                Spacer()
-                Text("\(DS.Format.money(spent)) / \(DS.Format.money(budget))")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(isOver ? DS.Colors.danger : DS.Colors.text)
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(DS.Colors.surface2)
-
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(isOver ? DS.Colors.danger : DS.Colors.accent)
-                        .frame(width: geo.size.width * min(1.0, CGFloat(utilization)))
-                }
-            }
-            .frame(height: 6)
-        }
-    }
-
-    // MARK: - Shared Goal
-
-    private func sharedGoalRow(_ goal: SharedGoal, totalCount: Int) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: goal.icon)
-                .font(.system(size: 10))
-                .foregroundStyle(DS.Colors.accent)
-
-            Text(goal.name)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(DS.Colors.text)
-                .lineLimit(1)
-
-            Spacer()
-
-            // Progress pill
-            Text("\(goal.progressPercent)%")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(goal.progress >= 0.75 ? DS.Colors.positive : DS.Colors.accent)
-
-            // Mini progress bar
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(DS.Colors.surface2)
-                    .frame(width: 40, height: 4)
-
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(goal.progress >= 0.75 ? DS.Colors.positive : DS.Colors.accent)
-                    .frame(width: 40 * min(1.0, CGFloat(goal.progress)), height: 4)
-            }
-
-            if totalCount > 1 {
-                Text("+\(totalCount - 1)")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(DS.Colors.subtext)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(DS.Colors.surface2, in: Capsule())
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    private func hasBottomContent(_ h: Household, snapshot: HouseholdSnapshot) -> Bool {
+        let hasPartner = h.partner != nil && h.owner != nil
+        let hasBudget = snapshot.budgetUtilization != nil && snapshot.sharedBudget > 0
+        let hasGoal = snapshot.topGoal != nil
+        let hasAlerts = !buildAlerts(snapshot).isEmpty
+        return hasPartner || hasBudget || hasGoal || hasAlerts
     }
 
     // MARK: - Alerts
-
-    @ViewBuilder
-    private func alertsRow(_ snapshot: HouseholdSnapshot) -> some View {
-        let alerts = buildAlerts(snapshot)
-        if !alerts.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(alerts.prefix(2), id: \.text) { alert in
-                    HStack(spacing: 4) {
-                        Image(systemName: alert.icon)
-                            .font(.system(size: 10))
-                        Text(alert.text)
-                            .font(.system(size: 10, weight: .semibold))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(alert.color)
-                }
-            }
-        }
-    }
 
     private struct AlertItem: Hashable {
         let icon: String
@@ -253,54 +258,17 @@ struct HouseholdDashboardCard: View {
         var alerts: [AlertItem] = []
 
         if snapshot.isOverBudget {
-            alerts.append(AlertItem(
-                icon: "exclamationmark.triangle.fill",
-                text: "Shared spending over budget",
-                color: DS.Colors.danger
-            ))
+            alerts.append(AlertItem(icon: "exclamationmark.triangle.fill", text: "Over budget", color: DS.Colors.danger))
         }
-
         if snapshot.youOwe > 0 {
-            alerts.append(AlertItem(
-                icon: "arrow.uturn.right.circle.fill",
-                text: "You owe \(DS.Format.money(snapshot.youOwe))",
-                color: DS.Colors.warning
-            ))
+            alerts.append(AlertItem(icon: "arrow.uturn.right.circle.fill", text: "You owe \(DS.Format.money(snapshot.youOwe))", color: DS.Colors.warning))
         } else if snapshot.owedToYou > 0 {
-            alerts.append(AlertItem(
-                icon: "arrow.uturn.left.circle.fill",
-                text: "\(DS.Format.money(snapshot.owedToYou)) owed to you",
-                color: DS.Colors.positive
-            ))
+            alerts.append(AlertItem(icon: "arrow.uturn.left.circle.fill", text: "\(DS.Format.money(snapshot.owedToYou)) owed to you", color: DS.Colors.positive))
         }
-
         if snapshot.unsettledCount > 3 {
-            alerts.append(AlertItem(
-                icon: "clock.fill",
-                text: "\(snapshot.unsettledCount) expenses need settling",
-                color: DS.Colors.warning
-            ))
-        }
-
-        if !snapshot.hasPartner && snapshot.memberCount <= 1 {
-            alerts.append(AlertItem(
-                icon: "person.badge.plus",
-                text: "Invite your partner to share finances",
-                color: DS.Colors.accent
-            ))
+            alerts.append(AlertItem(icon: "clock.fill", text: "\(snapshot.unsettledCount) to settle", color: DS.Colors.warning))
         }
 
         return alerts
-    }
-
-    // MARK: - Tag Pill
-
-    private func tagPill(_ text: String, _ color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.1), in: Capsule())
     }
 }

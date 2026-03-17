@@ -1096,7 +1096,7 @@ private struct DashboardView: View {
         let remaining = budget - summary.totalSpent
         let isOver = remaining < 0
 
-        return VStack(spacing: 10) {
+        return VStack(spacing: 12) {
             // Header
             HStack {
                 Text("Budget Overview")
@@ -1108,58 +1108,66 @@ private struct DashboardView: View {
                     .foregroundStyle(DS.Colors.subtext)
             }
 
-            // Visual gauge
-            VStack(spacing: 0) {
-                GeometryReader { geo in
-                    let w = geo.size.width
-                    ZStack(alignment: .leading) {
-                        // Track
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(DS.Colors.surface2)
-                            .frame(height: 10)
+            // Progress bar
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(DS.Colors.surface2)
+                        .frame(height: 10)
 
-                        // Fill
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(
-                                LinearGradient(
-                                    colors: [barColor.opacity(0.7), barColor],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(
+                            LinearGradient(
+                                colors: [barColor.opacity(0.7), barColor],
+                                startPoint: .leading,
+                                endPoint: .trailing
                             )
-                            .frame(width: w * min(1.0, spentRatio), height: 10)
+                        )
+                        .frame(width: w * min(1.0, spentRatio), height: 10)
 
-                        // Threshold markers
-                        Rectangle()
-                            .fill(DS.Colors.warning.opacity(0.6))
-                            .frame(width: 1.5, height: 16)
-                            .offset(x: w * 0.7 - 0.75)
-                        Rectangle()
-                            .fill(DS.Colors.danger.opacity(0.6))
-                            .frame(width: 1.5, height: 16)
-                            .offset(x: w * 0.9 - 0.75)
-
-                        // Scale labels positioned exactly
-                        Text("0%")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(DS.Colors.subtext)
-                            .position(x: 10, y: 24)
-                        Text("70%")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(DS.Colors.warning)
-                            .position(x: w * 0.7, y: 24)
-                        Text("90%")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(DS.Colors.danger)
-                            .position(x: w * 0.9, y: 24)
-                        Text("100%")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(DS.Colors.subtext)
-                            .position(x: w - 14, y: 24)
-                    }
+                    // Threshold markers
+                    Rectangle()
+                        .fill(DS.Colors.warning.opacity(0.6))
+                        .frame(width: 1.5, height: 14)
+                        .offset(x: w * 0.7 - 0.75)
+                    Rectangle()
+                        .fill(DS.Colors.danger.opacity(0.6))
+                        .frame(width: 1.5, height: 14)
+                        .offset(x: w * 0.9 - 0.75)
                 }
-                .frame(height: 32)
             }
+            .frame(height: 10)
+
+            // Scale labels — separate row below bar
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    Text("0%")
+                        .position(x: 10, y: 6)
+                        .foregroundStyle(DS.Colors.subtext)
+                    Text("50%")
+                        .position(x: w * 0.5, y: 6)
+                        .foregroundStyle(DS.Colors.subtext)
+                    Text("70%")
+                        .position(x: w * 0.7, y: 6)
+                        .foregroundStyle(DS.Colors.warning)
+                    Text("100%")
+                        .position(x: w - 16, y: 6)
+                        .foregroundStyle(DS.Colors.subtext)
+                }
+                .font(.system(size: 8, weight: .medium, design: .rounded))
+            }
+            .frame(height: 12)
+
+            // Percentage used — capsule pill
+            Text("\(Int(spentRatio * 100))% used")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(barColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 5)
+                .background(barColor.opacity(0.1), in: Capsule())
+                .frame(maxWidth: .infinity)
 
             // Spent / Remaining row
             HStack {
@@ -1168,14 +1176,8 @@ private struct DashboardView: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(DS.Colors.subtext)
                     Text(DS.Format.money(summary.totalSpent))
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundStyle(DS.Colors.text)
-                }
-                Spacer()
-                VStack(alignment: .center, spacing: 2) {
-                    Text("\(Int(spentRatio * 100))% used")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(barColor)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
@@ -1183,12 +1185,12 @@ private struct DashboardView: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(DS.Colors.subtext)
                     Text(DS.Format.money(abs(remaining)))
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundStyle(isOver ? DS.Colors.danger : DS.Colors.positive)
                 }
             }
         }
-        .padding(12)
+        .padding(14)
         .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

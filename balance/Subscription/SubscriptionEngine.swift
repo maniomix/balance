@@ -83,15 +83,19 @@ class SubscriptionEngine: ObservableObject {
             }
         }
 
+        // Merge recurring transactions as subscriptions
+        let recurringAsSubs = Self.convertRecurringToSubscriptions(store.recurringTransactions, existingIds: Set(subs.map { $0.merchantName.lowercased() }))
+        subs.append(contentsOf: recurringAsSubs)
+
         self.subscriptions = subs
         self.insights = result.globalInsights
-        self.monthlyTotal = result.subscriptions
+        self.monthlyTotal = subs
             .filter { $0.status == .active }
             .reduce(0) { $0 + $1.monthlyCost }
-        self.yearlyTotal = result.subscriptions
+        self.yearlyTotal = subs
             .filter { $0.status == .active }
             .reduce(0) { $0 + $1.yearlyCost }
-        self.activeCount = result.subscriptions.filter { $0.status == .active }.count
+        self.activeCount = subs.filter { $0.status == .active }.count
         self.lastAnalyzedAt = Date()
         self.isLoading = false
     }
@@ -148,6 +152,44 @@ class SubscriptionEngine: ObservableObject {
             .filter { $0.status == .active }
             .reduce(0) { $0 + $1.yearlyCost }
         activeCount = subscriptions.filter { $0.status == .active }.count
+    }
+
+    // MARK: - Recurring → Subscription Conversion
+
+    /// Convert active RecurringTransactions into DetectedSubscriptions,
+    /// skipping any that already exist (by merchant name match).
+    static func convertRecurringToSubscriptions(_ recurring: [RecurringTransaction], existingIds: Set<String>) -> [DetectedSubscription] {
+        recurring.compactMap { rt in
+            guard rt.isActive else { return nil }
+            let key = rt.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !existingIds.contains(key) else { return nil }
+
+            let cycle: BillingCycle = {
+                switch rt.frequency {
+                case .daily: return .custom
+                case .weekly: return .weekly
+                case .monthly: return .monthly
+                case .yearly: return .yearly
+                }
+            }()
+
+            return DetectedSubscription(
+                id: rt.id,
+                merchantName: rt.name,
+                category: rt.category,
+                expectedAmount: rt.amount,
+                lastAmount: rt.amount,
+                billingCycle: cycle,
+                nextRenewalDate: rt.nextOccurrence(),
+                lastChargeDate: rt.lastProcessedDate,
+                status: .active,
+                linkedTransactionIds: [],
+                notes: rt.note,
+                isAutoDetected: false,
+                confidenceScore: 1.0,
+                chargeHistory: []
+            )
+        }
     }
 
     // MARK: - Subscriptions by next renewal
