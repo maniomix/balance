@@ -131,35 +131,70 @@ struct Goal: Identifiable, Codable, Hashable {
         max(0, targetAmount - currentAmount)
     }
     
-    /// Monthly saving needed to hit target date
+    /// Monthly saving needed to hit target date.
+    /// For overdue goals, returns the full remaining amount (needs immediate attention).
+    /// For goals with no deadline, returns nil.
     var requiredMonthlySaving: Int? {
         guard let target = targetDate else { return nil }
         let remaining = remainingAmount
         guard remaining > 0 else { return 0 }
         let months = Calendar.current.dateComponents([.month], from: Date(), to: target).month ?? 0
-        guard months > 0 else { return remaining }
-        return remaining / months
+        guard months > 0 else { return remaining } // overdue: full amount needed now
+        return (remaining + months - 1) / months // round up so user doesn't undershoot
     }
-    
+
+    /// Months remaining until target date (negative if overdue, nil if no deadline)
+    var monthsToTarget: Int? {
+        guard let target = targetDate else { return nil }
+        return Calendar.current.dateComponents([.month], from: Date(), to: target).month
+    }
+
+    /// Whether this goal's deadline has passed without completion
+    var isOverdue: Bool {
+        guard let target = targetDate, !isCompleted else { return false }
+        return target < Date()
+    }
+
     /// Estimated completion date based on average contribution pace
     func estimatedCompletion(averageMonthly: Int) -> Date? {
         guard averageMonthly > 0, remainingAmount > 0 else { return nil }
         let monthsNeeded = Int(ceil(Double(remainingAmount) / Double(averageMonthly)))
         return Calendar.current.date(byAdding: .month, value: monthsNeeded, to: Date())
     }
-    
+
+    /// Whether the estimated completion date will miss the target date
+    func willMissDeadline(averageMonthly: Int) -> Bool {
+        guard let target = targetDate, !isCompleted else { return false }
+        guard let est = estimatedCompletion(averageMonthly: averageMonthly) else {
+            // No contributions yet — will miss if deadline exists and remaining > 0
+            return remainingAmount > 0
+        }
+        return est > target
+    }
+
+    /// Shortfall: how much extra per month is needed beyond current pace to hit deadline.
+    /// Returns nil if no deadline, 0 if on track or ahead.
+    func monthlyShortfall(averageMonthly: Int) -> Int? {
+        guard let required = requiredMonthlySaving else { return nil }
+        let gap = required - averageMonthly
+        return max(0, gap)
+    }
+
     /// On track / behind / ahead
     var trackingStatus: TrackingStatus {
         guard let target = targetDate else { return .noTarget }
         guard !isCompleted else { return .completed }
-        
+
+        // If overdue, always behind
+        if target < Date() { return .behind }
+
         let totalDays = Calendar.current.dateComponents([.day], from: createdAt, to: target).day ?? 1
         let elapsedDays = Calendar.current.dateComponents([.day], from: createdAt, to: Date()).day ?? 0
         guard totalDays > 0 else { return .behind }
-        
+
         let expectedProgress = Double(elapsedDays) / Double(totalDays)
         let diff = progress - expectedProgress
-        
+
         if diff >= 0.05 { return .ahead }
         if diff <= -0.05 { return .behind }
         return .onTrack
@@ -185,6 +220,16 @@ struct Goal: Identifiable, Codable, Hashable {
             case .behind: return "exclamationmark.triangle"
             case .completed: return "checkmark.circle.fill"
             case .noTarget: return "clock"
+            }
+        }
+
+        var colorToken: String {
+            switch self {
+            case .ahead: return "positive"
+            case .onTrack: return "accent"
+            case .behind: return "danger"
+            case .completed: return "positive"
+            case .noTarget: return "subtext"
             }
         }
     }

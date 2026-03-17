@@ -78,7 +78,7 @@ actor AIProxyService {
         case .success(let sanitized):
             return sanitized
         case .failure(let error):
-            throw AIProxyError.serverError(400, error.localizedDescription ?? "Invalid input")
+            throw AIProxyError.serverError(400, AppConfig.shared.safeErrorMessage(detail: error.localizedDescription, fallback: "Invalid input"))
         }
     }
 

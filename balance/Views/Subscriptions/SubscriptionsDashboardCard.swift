@@ -86,19 +86,59 @@ struct SubscriptionsDashboardCard: View {
                             }
                         }
 
-                        // Insight warnings
-                        let warnings = engine.insights.filter { $0 != .upcomingRenewal }
-                        if !warnings.isEmpty {
-                            HStack(spacing: 6) {
-                                ForEach(warnings.prefix(2)) { insight in
-                                    Label(insight.displayName, systemImage: insight.icon)
-                                        .font(.system(size: 9, weight: .bold))
-                                        .foregroundStyle(insight.color)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 3)
-                                        .background(insight.color.opacity(0.1), in: Capsule())
+                        // Actionable insights (not just labels — real alerts)
+                        let snapshot = engine.dashboardSnapshot
+                        VStack(alignment: .leading, spacing: 6) {
+                            // Price increases
+                            if snapshot.priceIncreaseCount > 0 {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.up.circle.fill")
+                                        .font(.system(size: 10))
+                                    Text("\(snapshot.priceIncreaseCount) price increase\(snapshot.priceIncreaseCount == 1 ? "" : "s")")
+                                        .font(.system(size: 10, weight: .semibold))
                                 }
-                                Spacer()
+                                .foregroundStyle(DS.Colors.danger)
+                            }
+
+                            // Unused subscriptions with savings
+                            if snapshot.unusedCount > 0 {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "questionmark.circle.fill")
+                                        .font(.system(size: 10))
+                                    Text("\(snapshot.unusedCount) maybe unused — save \(DS.Format.money(snapshot.potentialSavings))/mo")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .lineLimit(1)
+                                }
+                                .foregroundStyle(Color(hexValue: 0x9B59B6))
+                            }
+
+                            // Missed charges
+                            if snapshot.missedChargeCount > 0 {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 10))
+                                    Text("\(snapshot.missedChargeCount) missed charge\(snapshot.missedChargeCount == 1 ? "" : "s")")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .foregroundStyle(DS.Colors.warning)
+                            }
+
+                            // Other insight badges (duplicate risk, newly detected)
+                            let badges = engine.insights.filter {
+                                $0 != .upcomingRenewal && $0 != .priceIncreased && $0 != .maybeUnused && $0 != .missedCharge
+                            }
+                            if !badges.isEmpty {
+                                HStack(spacing: 6) {
+                                    ForEach(badges.prefix(2)) { insight in
+                                        Label(insight.displayName, systemImage: insight.icon)
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundStyle(insight.color)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 3)
+                                            .background(insight.color.opacity(0.1), in: Capsule())
+                                    }
+                                    Spacer()
+                                }
                             }
                         }
                     }

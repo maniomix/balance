@@ -412,11 +412,11 @@ struct ProfileView: View {
                 do {
                     if let userId = authManager.currentUser?.uid {
                         let currentStore = Store.load(userId: userId)
-                        try? await supabaseManager.saveStore(currentStore)
+                        _ = await SyncCoordinator.shared.pushToCloud(store: currentStore, userId: userId)
                     }
                     try authManager.signOut()
                 } catch {
-                    print("Sign out error: \(error)")
+                    SecureLogger.error("Sign out failed", error)
                 }
             }
         } label: {
@@ -552,7 +552,7 @@ struct ProfileView: View {
                 }
             }
         } catch {
-            print("⚠️ Cloud profile load failed: \(error)")
+            SecureLogger.warning("Cloud profile load failed")
         }
     }
     
@@ -577,10 +577,10 @@ struct ProfileView: View {
                     .execute()
                 
                 await MainActor.run { isSaving = false }
-                print("✅ Profile synced")
+                SecureLogger.info("Profile synced")
             } catch {
                 await MainActor.run { isSaving = false }
-                print("❌ Profile sync failed: \(error)")
+                SecureLogger.error("Profile sync failed", error)
             }
         }
     }

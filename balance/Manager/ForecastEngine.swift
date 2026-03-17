@@ -182,7 +182,22 @@ class ForecastEngine: ObservableObject {
 
         // ─── Step 5: Budget for selected month ───
 
-        let budget = store.budget(for: selectedMonth)
+        let rawBudget = store.budget(for: selectedMonth)
+
+        // If no budget is set (0), fall back to average monthly income as a reasonable ceiling.
+        // This prevents safe-to-spend from showing 0 when user hasn't configured a budget.
+        let budget: Int
+        let budgetIsMissing: Bool
+        if rawBudget > 0 {
+            budget = rawBudget
+            budgetIsMissing = false
+        } else if avgMonthlyIncome > 0 {
+            budget = avgMonthlyIncome
+            budgetIsMissing = true
+        } else {
+            budget = incomeThisMonth > 0 ? incomeThisMonth : 0
+            budgetIsMissing = true
+        }
 
         // ─── Step 5b: Projected end-of-month balance ───
 
@@ -210,36 +225,44 @@ class ForecastEngine: ObservableObject {
             proj60 = currentRemaining
             proj90 = currentRemaining
         } else {
+            // Note: projectionDailyRate already embeds recurring charges from historical
+            // transaction data, so we do NOT subtract next30Recurring separately to avoid
+            // double-counting. Recurring expenses are implicit in the daily spending rate.
             let daysInto30 = max(0, 30 - daysRemaining)
             proj30 = currentRemaining
                 - (projectionDailyRate * daysRemaining)
                 - (avgDailyExpense * daysInto30)
                 + (avgMonthlyIncome * daysInto30 / 30)
-                - next30Recurring
                 + (daysRemaining > 0 ? 0 : avgMonthlyIncome)
 
-            proj60 = proj30 + monthlyNet - next60Recurring + next30Recurring
-            proj90 = proj60 + monthlyNet - next90Recurring + next60Recurring
+            proj60 = proj30 + monthlyNet
+            proj90 = proj60 + monthlyNet
         }
 
         // ─── Step 7: Safe to spend ───
+
+        // Detect overdue bills (due before today but still in upcoming list)
+        let overdueBillCount = upcomingBills.filter { $0.dueDate < realToday }.count
 
         let safeToSpend = computeSafeToSpend(
             currentRemaining: currentRemaining,
             daysRemaining: daysRemaining,
             upcomingBills: upcomingBills,
             monthlyGoalContributions: monthlyGoalContributions,
-            budget: budget
+            budget: budget,
+            budgetIsMissing: budgetIsMissing
         )
 
-        // ─── Step 8: Risk level ───
+        // ─── Step 8: Risk level (with hysteresis for stability) ───
 
         let riskLevel = computeRiskLevel(
             safeToSpend: safeToSpend,
             projectedMonthEnd: projectedMonthEnd,
             budget: budget,
             spentRatio: budget > 0 ? Double(spentThisMonth) / Double(budget) : 0,
-            dayRatio: daysInMonth > 0 ? Double(dayOfMonth) / Double(daysInMonth) : 0
+            dayRatio: daysInMonth > 0 ? Double(dayOfMonth) / Double(daysInMonth) : 0,
+            currentRemaining: currentRemaining,
+            overdueBillCount: overdueBillCount
         )
 
         // ─── Step 9: Timeline (daily projections for chart) ───
@@ -272,11 +295,22 @@ class ForecastEngine: ObservableObject {
             transactions: selectedMonthTx.filter { $0.type == .expense }
         )
 
+        // ─── Compute data confidence ───
+        let dataConfidence: DataConfidence
+        if monthsOfData >= 3 {
+            dataConfidence = .high
+        } else if monthsOfData >= 1 {
+            dataConfidence = .medium
+        } else {
+            dataConfidence = .low
+        }
+
         return ForecastResult(
             // Current state
             spentThisMonth: spentThisMonth,
             incomeThisMonth: incomeThisMonth,
             budget: budget,
+            budgetIsMissing: budgetIsMissing,
             currentRemaining: currentRemaining,
             daysRemainingInMonth: daysRemaining,
             dayOfMonth: dayOfMonth,
@@ -291,6 +325,7 @@ class ForecastEngine: ObservableObject {
             // Recurring
             monthlyRecurringExpense: monthlyRecurringExpense,
             upcomingBills: upcomingBills,
+            overdueBillCount: overdueBillCount,
 
             // Goals
             monthlyGoalContributions: monthlyGoalContributions,
@@ -304,6 +339,9 @@ class ForecastEngine: ObservableObject {
             // Safe to spend
             safeToSpend: safeToSpend,
             riskLevel: riskLevel,
+
+            // Data quality
+            dataConfidence: dataConfidence,
 
             // Timeline
             timeline: timeline,
@@ -423,7 +461,8 @@ class ForecastEngine: ObservableObject {
         daysRemaining: Int,
         upcomingBills: [UpcomingBill],
         monthlyGoalContributions: Int,
-        budget: Int
+        budget: Int,
+        budgetIsMissing: Bool
     ) -> SafeToSpend {
 
         // Upcoming bills due within the remaining days
@@ -434,11 +473,15 @@ class ForecastEngine: ObservableObject {
         // Goal contributions remaining for this month (assume not yet contributed)
         let goalReserve = monthlyGoalContributions
 
-        // Total amount
-        let totalSafe = max(0, currentRemaining - billsThisMonth - goalReserve)
+        // Total amount — can go negative to show overcommitment clearly
+        let rawSafe = currentRemaining - billsThisMonth - goalReserve
+        let totalSafe = max(0, rawSafe)
 
         // Per day
         let perDay = daysRemaining > 0 ? totalSafe / daysRemaining : totalSafe
+
+        // Detect if user is overcommitted (bills + goals exceed remaining)
+        let isOvercommitted = rawSafe < 0
 
         return SafeToSpend(
             totalAmount: totalSafe,
@@ -446,43 +489,77 @@ class ForecastEngine: ObservableObject {
             daysRemaining: daysRemaining,
             reservedForBills: billsThisMonth,
             reservedForGoals: goalReserve,
-            budgetRemaining: currentRemaining
+            budgetRemaining: currentRemaining,
+            isOvercommitted: isOvercommitted,
+            overcommitAmount: isOvercommitted ? abs(rawSafe) : 0,
+            budgetIsMissing: budgetIsMissing
         )
     }
 
     // MARK: - Risk Level
 
-    /// Determine risk level from multiple signals.
+    /// Determine risk level from multiple signals with scoring for stability.
     ///
-    /// SAFE:    spending on pace, positive projections
-    /// CAUTION: spending slightly ahead, or low remaining
-    /// HIGH RISK: over budget or negative projections
+    /// Uses a point-based system instead of hard thresholds to avoid
+    /// the risk level flipping between states on small data changes.
+    ///
+    /// Score thresholds: 0-2 = SAFE, 3-5 = CAUTION, 6+ = HIGH RISK
     nonisolated private static func computeRiskLevel(
         safeToSpend: SafeToSpend,
         projectedMonthEnd: Int,
         budget: Int,
         spentRatio: Double,
-        dayRatio: Double
+        dayRatio: Double,
+        currentRemaining: Int,
+        overdueBillCount: Int
     ) -> RiskLevel {
 
-        // Already overspent
-        if safeToSpend.totalAmount <= 0 { return .highRisk }
+        var riskScore = 0
 
-        // Projected to overshoot budget
-        if projectedMonthEnd < 0 { return .highRisk }
+        // Signal 1: Safe-to-spend exhausted (strong high-risk signal)
+        if safeToSpend.totalAmount <= 0 {
+            riskScore += 6
+        } else if safeToSpend.isOvercommitted {
+            riskScore += 4
+        }
 
-        // Spending faster than time passing
-        if spentRatio > 0 && dayRatio > 0 {
+        // Signal 2: Projected to overshoot budget
+        if projectedMonthEnd < 0 {
+            riskScore += 4
+        } else if budget > 0 && projectedMonthEnd < budget / 10 {
+            riskScore += 2 // tight but not negative
+        }
+
+        // Signal 3: Spending pace vs time pace
+        if spentRatio > 0 && dayRatio > 0.1 { // need at least ~3 days of data
             let paceRatio = spentRatio / dayRatio
-            if paceRatio > 1.3 { return .highRisk }
-            if paceRatio > 1.05 { return .caution }
+            if paceRatio > 1.3 {
+                riskScore += 4
+            } else if paceRatio > 1.1 {
+                riskScore += 2
+            } else if paceRatio > 1.0 {
+                riskScore += 1
+            }
         }
 
-        // Low safe-to-spend per day (less than 5% of budget)
-        if budget > 0 && safeToSpend.perDay < budget / 20 {
-            return .caution
+        // Signal 4: Low safe-to-spend per day relative to budget
+        if budget > 0 && safeToSpend.perDay > 0 && safeToSpend.perDay < budget / 20 {
+            riskScore += 2
         }
 
+        // Signal 5: Overdue bills present
+        if overdueBillCount > 0 {
+            riskScore += 2
+        }
+
+        // Signal 6: Already in negative remaining
+        if currentRemaining < 0 {
+            riskScore += 3
+        }
+
+        // Score to level
+        if riskScore >= 6 { return .highRisk }
+        if riskScore >= 3 { return .caution }
         return .safe
     }
 
@@ -616,6 +693,7 @@ struct ForecastResult {
     let spentThisMonth: Int
     let incomeThisMonth: Int
     let budget: Int
+    let budgetIsMissing: Bool
     let currentRemaining: Int
     let daysRemainingInMonth: Int
     let dayOfMonth: Int
@@ -630,6 +708,7 @@ struct ForecastResult {
     // Recurring
     let monthlyRecurringExpense: Int
     let upcomingBills: [UpcomingBill]
+    let overdueBillCount: Int
 
     // Goals
     let monthlyGoalContributions: Int
@@ -643,6 +722,9 @@ struct ForecastResult {
     // Safe to spend
     let safeToSpend: SafeToSpend
     let riskLevel: RiskLevel
+
+    // Data quality
+    let dataConfidence: DataConfidence
 
     // Timeline (day-by-day for chart)
     let timeline: [ForecastPoint]
@@ -662,6 +744,26 @@ struct ForecastResult {
         guard budget > 0 else { return 0 }
         return Double(spentThisMonth) / Double(budget)
     }
+
+    /// The most urgent risk to surface on the dashboard
+    var urgentRiskSummary: String? {
+        if safeToSpend.isOvercommitted {
+            return "Over-committed by \(DS.Format.money(safeToSpend.overcommitAmount)) — bills + goals exceed budget"
+        }
+        if currentRemaining < 0 {
+            return "Over budget by \(DS.Format.money(abs(currentRemaining)))"
+        }
+        if overdueBillCount > 0 {
+            return "\(overdueBillCount) overdue bill\(overdueBillCount == 1 ? "" : "s") need attention"
+        }
+        if riskLevel == .highRisk && projected30Day < 0 {
+            return "30-day projection is negative — reduce spending"
+        }
+        if budgetIsMissing {
+            return "No budget set — safe-to-spend is estimated from income"
+        }
+        return nil
+    }
 }
 
 struct SafeToSpend {
@@ -671,6 +773,31 @@ struct SafeToSpend {
     let reservedForBills: Int
     let reservedForGoals: Int
     let budgetRemaining: Int
+    let isOvercommitted: Bool   // bills + goals exceed remaining
+    let overcommitAmount: Int   // how much over (0 if not overcommitted)
+    let budgetIsMissing: Bool   // budget was estimated, not user-set
+}
+
+enum DataConfidence {
+    case high      // 3+ months of history
+    case medium    // 1-2 months of history
+    case low       // no history, projections unreliable
+
+    var label: String {
+        switch self {
+        case .high: return "High confidence"
+        case .medium: return "Moderate confidence"
+        case .low: return "Limited data"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .high: return "checkmark.circle"
+        case .medium: return "circle.lefthalf.filled"
+        case .low: return "exclamationmark.circle"
+        }
+    }
 }
 
 struct UpcomingBill: Identifiable {

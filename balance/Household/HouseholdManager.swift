@@ -381,6 +381,127 @@ class HouseholdManager: ObservableObject {
     }
 
     // ============================================================
+    // MARK: - Transaction ↔ Household Linking
+    // ============================================================
+
+    /// Whether a transaction is linked to a split expense.
+    func isSplitTransaction(_ transactionId: UUID) -> Bool {
+        splitExpenses.contains { $0.transactionId == transactionId }
+    }
+
+    /// The split expense linked to a transaction, if any.
+    func splitExpense(for transactionId: UUID) -> SplitExpense? {
+        splitExpenses.first { $0.transactionId == transactionId }
+    }
+
+    /// All transaction IDs that are part of split expenses (cached set for fast lookup).
+    var splitTransactionIds: Set<UUID> {
+        Set(splitExpenses.map { $0.transactionId })
+    }
+
+    // ============================================================
+    // MARK: - Dashboard Snapshot
+    // ============================================================
+
+    /// Total unsettled amount across all open split expenses.
+    var totalUnsettledAmount: Int {
+        unsettledExpenses.reduce(0) { $0 + $1.amount }
+    }
+
+    /// Total amount the current user owes across all members.
+    func totalOwed(currentUserId uid: String) -> Int {
+        guard let h = household else { return 0 }
+        var total = 0
+        for member in h.members where member.userId != uid {
+            let balance = netBalance(fromUser: uid, toUser: member.userId)
+            if balance > 0 { total += balance }
+        }
+        return total
+    }
+
+    /// Total amount owed TO the current user across all members.
+    func totalOwedToYou(currentUserId uid: String) -> Int {
+        guard let h = household else { return 0 }
+        var total = 0
+        for member in h.members where member.userId != uid {
+            let balance = netBalance(fromUser: uid, toUser: member.userId)
+            if balance < 0 { total += abs(balance) }
+        }
+        return total
+    }
+
+    /// Whether the shared budget for the given month is over-budget.
+    func isOverBudget(monthKey: String) -> Bool {
+        guard let sb = sharedBudget(for: monthKey), sb.totalAmount > 0 else { return false }
+        return sharedSpending(monthKey: monthKey) > sb.totalAmount
+    }
+
+    /// How much is left in the shared budget (negative = over).
+    func sharedBudgetRemaining(monthKey: String) -> Int? {
+        guard let sb = sharedBudget(for: monthKey), sb.totalAmount > 0 else { return nil }
+        return sb.totalAmount - sharedSpending(monthKey: monthKey)
+    }
+
+    /// Shared budget utilization ratio (0.0–1.0+). Nil if no budget set.
+    func sharedBudgetUtilization(monthKey: String) -> Double? {
+        guard let sb = sharedBudget(for: monthKey), sb.totalAmount > 0 else { return nil }
+        return Double(sharedSpending(monthKey: monthKey)) / Double(sb.totalAmount)
+    }
+
+    /// Recent split expenses (last N, across all months).
+    func recentSplitExpenses(limit: Int = 3) -> [SplitExpense] {
+        guard let h = household else { return [] }
+        return splitExpenses
+            .filter { $0.householdId == h.id }
+            .sorted { $0.date > $1.date }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// Recent settlements (last N).
+    func recentSettlements(limit: Int = 3) -> [Settlement] {
+        guard let h = household else { return [] }
+        return settlements
+            .filter { $0.householdId == h.id }
+            .sorted { $0.date > $1.date }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// Dashboard snapshot combining all key household metrics.
+    func dashboardSnapshot(monthKey: String, currentUserId uid: String) -> HouseholdSnapshot {
+        let spending = sharedSpending(monthKey: monthKey)
+        let budget = sharedBudget(for: monthKey)
+        let budgetAmount = budget?.totalAmount ?? 0
+        let utilization = sharedBudgetUtilization(monthKey: monthKey)
+        let unsettled = unsettledExpenses.count
+        let unsettledTotal = totalUnsettledAmount
+        let youOwe = totalOwed(currentUserId: uid)
+        let owedToYou = totalOwedToYou(currentUserId: uid)
+        let activeGoals = activeSharedGoals
+        let overBudget = isOverBudget(monthKey: monthKey)
+
+        return HouseholdSnapshot(
+            memberCount: household?.memberCount ?? 0,
+            hasPartner: household?.partner != nil,
+            sharedSpending: spending,
+            sharedBudget: budgetAmount,
+            budgetUtilization: utilization,
+            isOverBudget: overBudget,
+            unsettledCount: unsettled,
+            unsettledAmount: unsettledTotal,
+            youOwe: youOwe,
+            owedToYou: owedToYou,
+            activeSharedGoalCount: activeGoals.count,
+            topGoal: activeGoals.sorted(by: { $0.progress > $1.progress }).first,
+            totalGoalProgress: activeGoals.isEmpty ? 0 :
+                activeGoals.reduce(0) { $0 + $1.currentAmount } * 100 /
+                max(1, activeGoals.reduce(0) { $0 + $1.targetAmount }),
+            pendingInviteCount: pendingInvites.filter { !$0.isExpired && $0.status == .pending }.count
+        )
+    }
+
+    // ============================================================
     // MARK: - Persistence Helpers
     // ============================================================
 

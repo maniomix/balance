@@ -77,12 +77,40 @@ struct GoalsDashboardCard: View {
                             }
                         }
 
-                        // Behind schedule warning
-                        if !goalManager.behindGoals.isEmpty {
+                        // Pacing summary for top goals
+                        ForEach(goalManager.goalsByPriority.prefix(3)) { goal in
+                            if let required = goal.requiredMonthlySaving, required > 0,
+                               goal.trackingStatus == .behind || goal.trackingStatus == .onTrack {
+                                HStack(spacing: 4) {
+                                    Image(systemName: goal.trackingStatus == .behind
+                                        ? "exclamationmark.triangle"
+                                        : "arrow.up.circle")
+                                        .font(.system(size: 9))
+                                    Text("\(goal.name): \(DS.Format.money(required))/mo needed")
+                                        .font(.system(size: 10))
+                                        .lineLimit(1)
+                                }
+                                .foregroundStyle(goal.trackingStatus == .behind ? DS.Colors.warning : DS.Colors.subtext)
+                            }
+                        }
+
+                        // Behind/overdue summary
+                        let snapshot = goalManager.planningSnapshot
+                        if snapshot.overdueCount > 0 {
                             HStack(spacing: 4) {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .font(.system(size: 10))
-                                Text("\(goalManager.behindGoals.count) behind schedule")
+                                Text("\(snapshot.overdueCount) overdue")
+                                    .font(.system(size: 10))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(DS.Colors.danger)
+                            .padding(.top, 2)
+                        } else if snapshot.behindCount > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 10))
+                                Text("\(snapshot.behindCount) behind schedule")
                                     .font(.system(size: 10))
                                     .lineLimit(1)
                             }

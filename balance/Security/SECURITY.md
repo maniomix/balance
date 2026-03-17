@@ -70,6 +70,7 @@ The Supabase **anon key** is designed to be used in clients — it is NOT a secr
 - Error messages sanitized for user-facing display
 - All `print()` calls replaced with SecureLogger
 - No financial amounts or goal names in production logs
+- **Ownership validation on delete**: `deleteGoal()` now filters by `user_id` to prevent cross-user deletion
 
 ### 8. AnalyticsManager Hardened
 - Replaced `#if DEBUG print()` with `SecureLogger.debug()` (auto-suppressed in production)
@@ -82,7 +83,30 @@ The Supabase **anon key** is designed to be used in clients — it is NOT a secr
 - Response validation via `RequestGuard.validateResponse()` with proper error mapping
 - Error messages sanitized via `AppConfig.safeErrorMessage()`
 
-### 10. RequestGuard Enhanced
+### 10. SupabaseManager Delete Operations Hardened
+- `deleteTransaction()` now requires authenticated user and filters by `user_id`
+- `deleteMonthData()` now validates that the `userId` parameter matches the authenticated user
+- Both throw explicit errors on auth/permission failures instead of silently proceeding
+
+### 11. ProfileView Hardened
+- Replaced all `print()` calls with SecureLogger
+- Sign-out sync now routes through `SyncCoordinator.pushToCloud()` instead of direct `supabaseManager.saveStore()`
+
+### 12. ContentView Sync Consistency
+- Month deletion cloud push routed through `SyncCoordinator.pushToCloud()`
+- CSV import cloud push routed through `SyncCoordinator.pushToCloud()`
+- No remaining direct `supabaseManager.saveStore()` calls outside the sync layer
+
+### 13. SyncStatusView Updated
+- Migrated from `SupabaseManager` to `SyncCoordinator` for sync status, error state, and last-sync time
+- Manual sync now uses `SyncCoordinator.fullReconcile()` instead of direct `supabaseManager.syncStore()`
+- Shows offline status when network is unavailable
+
+### 14. SupabaseTestView Hardened
+- Error display uses `AppConfig.safeErrorMessage()` instead of raw `error.localizedDescription`
+- Auth state reads from `AuthManager` instead of removed `SupabaseManager.isAuthenticated`
+
+### 15. RequestGuard Enhanced
 - Added field sanitization (`sanitizeField`) — strips control characters, enforces length limits
 - Added amount validation (`validateAmount`) — bounds-checked monetary input
 - Added SQL injection detection (`containsSQLInjection`)
@@ -194,7 +218,7 @@ serve(async (req) => {
 - **Field sanitization**: Control character stripping, length limits (RequestGuard)
 - **Log sanitization**: JWTs, API keys, emails, UUIDs, URLs, Bearer tokens (SecureLogger)
 - **Error sanitization**: Internal errors masked, truncated to 300 chars (SecureLogger, AppConfig)
-- **Ownership validation**: Account deletion checks userId (AccountManager)
+- **Ownership validation**: Account deletion checks userId (AccountManager), goal deletion filters by user_id (GoalManager), transaction deletion filters by user_id (SupabaseManager), month data deletion validates authenticated user (SupabaseManager)
 - **Session cleanup**: All local caches cleared on sign-out (AuthManager)
 - **HTTPS enforcement**: Non-dev environments require HTTPS (AppConfig)
 

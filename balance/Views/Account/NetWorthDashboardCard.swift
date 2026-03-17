@@ -8,58 +8,63 @@ struct NetWorthDashboardCard: View {
     @StateObject private var netWorthManager = NetWorthManager.shared
     
     var body: some View {
-        NavigationLink(destination: AccountsListView()) {
-            DS.Card {
-                VStack(spacing: 12) {
-                    HStack {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chart.bar.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(DS.Colors.accent)
-                            Text("Net Worth")
-                                .font(DS.Typography.caption)
-                                .foregroundStyle(DS.Colors.subtext)
+        if !accountManager.accounts.isEmpty || netWorthManager.isLoading {
+            NavigationLink(destination: AccountsListView()) {
+                DS.Card {
+                    VStack(spacing: 12) {
+                        HStack {
+                            HStack(spacing: 5) {
+                                Image(systemName: "chart.bar.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(DS.Colors.accent)
+                                Text("Net Worth")
+                                    .font(DS.Typography.caption)
+                                    .foregroundStyle(DS.Colors.subtext)
+                            }
+                            Spacer()
+                            if netWorthManager.isLoading {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else if netWorthManager.summary.changeFromLastMonth != 0 {
+                                changeBadge
+                            }
                         }
-                        Spacer()
-                        if netWorthManager.summary.changeFromLastMonth != 0 {
-                            changeBadge
+
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(fmtCurrency(netWorthManager.summary.netWorth))
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundStyle(DS.Colors.text)
+                                .redacted(reason: netWorthManager.isLoading ? .placeholder : [])
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(DS.Colors.subtext.opacity(0.4))
                         }
-                    }
-                    
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(fmtCurrency(netWorthManager.summary.netWorth))
-                            .font(.system(size: 24, weight: .bold, design: .rounded))
-                            .foregroundStyle(DS.Colors.text)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(DS.Colors.subtext.opacity(0.4))
-                    }
-                    
-                    HStack(spacing: 0) {
-                        HStack(spacing: 4) {
-                            Circle().fill(DS.Colors.positive).frame(width: 6, height: 6)
-                            Text(fmtCompact(accountManager.totalAssets))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(DS.Colors.positive)
-                        }
-                        Spacer()
-                        assetLiabilityBar
-                        Spacer()
-                        HStack(spacing: 4) {
-                            Text(fmtCompact(accountManager.totalLiabilities))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(DS.Colors.danger)
-                            Circle().fill(DS.Colors.danger).frame(width: 6, height: 6)
+
+                        HStack(spacing: 0) {
+                            HStack(spacing: 4) {
+                                Circle().fill(DS.Colors.positive).frame(width: 6, height: 6)
+                                Text(fmtCompact(accountManager.totalAssets))
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(DS.Colors.positive)
+                            }
+                            Spacer()
+                            assetLiabilityBar
+                            Spacer()
+                            HStack(spacing: 4) {
+                                Text(fmtCompact(accountManager.totalLiabilities))
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(DS.Colors.danger)
+                                Circle().fill(DS.Colors.danger).frame(width: 6, height: 6)
+                            }
                         }
                     }
                 }
             }
-        }
-        .buttonStyle(.plain)
-        .task {
-            await accountManager.fetchAccounts()
-            await netWorthManager.computeSummary()
+            .buttonStyle(.plain)
+            .task {
+                await netWorthManager.computeSummary()
+            }
         }
     }
     

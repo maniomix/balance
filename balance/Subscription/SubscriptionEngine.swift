@@ -40,7 +40,24 @@ class SubscriptionEngine: ObservableObject {
     @Published var yearlyTotal: Int = 0
     @Published var activeCount: Int = 0
 
-    private init() {}
+    // Persisted subscription status overrides (keyed by normalized merchant name)
+    private static let statusOverridesKey = "subscriptions.status_overrides"
+
+    private var statusOverrides: [String: String] = [:] {
+        didSet { saveStatusOverrides() }
+    }
+
+    private init() {
+        loadStatusOverrides()
+    }
+
+    private func loadStatusOverrides() {
+        statusOverrides = UserDefaults.standard.dictionary(forKey: Self.statusOverridesKey) as? [String: String] ?? [:]
+    }
+
+    private func saveStatusOverrides() {
+        UserDefaults.standard.set(statusOverrides, forKey: Self.statusOverridesKey)
+    }
 
     // MARK: - Main Analysis
 
@@ -56,7 +73,17 @@ class SubscriptionEngine: ObservableObject {
             Self.detect(transactions: transactions, existingManual: existing)
         }.value
 
-        self.subscriptions = result.subscriptions
+        // Apply persisted status overrides to re-detected subscriptions
+        var subs = result.subscriptions
+        for i in subs.indices {
+            let merchantKey = subs[i].merchantName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            if let overrideRaw = statusOverrides[merchantKey],
+               let override = SubscriptionStatus(rawValue: overrideRaw) {
+                subs[i].status = override
+            }
+        }
+
+        self.subscriptions = subs
         self.insights = result.globalInsights
         self.monthlyTotal = result.subscriptions
             .filter { $0.status == .active }
@@ -75,6 +102,7 @@ class SubscriptionEngine: ObservableObject {
         guard let idx = subscriptions.firstIndex(where: { $0.id == sub.id }) else { return }
         subscriptions[idx].status = .cancelled
         subscriptions[idx].updatedAt = Date()
+        persistStatus(for: subscriptions[idx])
         recalcTotals()
     }
 
@@ -82,6 +110,7 @@ class SubscriptionEngine: ObservableObject {
         guard let idx = subscriptions.firstIndex(where: { $0.id == sub.id }) else { return }
         subscriptions[idx].status = .paused
         subscriptions[idx].updatedAt = Date()
+        persistStatus(for: subscriptions[idx])
         recalcTotals()
     }
 
@@ -89,7 +118,15 @@ class SubscriptionEngine: ObservableObject {
         guard let idx = subscriptions.firstIndex(where: { $0.id == sub.id }) else { return }
         subscriptions[idx].status = .active
         subscriptions[idx].updatedAt = Date()
+        // Remove override so auto-detection takes over again
+        let merchantKey = subscriptions[idx].merchantName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        statusOverrides.removeValue(forKey: merchantKey)
         recalcTotals()
+    }
+
+    private func persistStatus(for sub: DetectedSubscription) {
+        let merchantKey = sub.merchantName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        statusOverrides[merchantKey] = sub.status.rawValue
     }
 
     func updateNotes(_ sub: DetectedSubscription, notes: String) {
@@ -134,23 +171,90 @@ class SubscriptionEngine: ObservableObject {
         if sub.status == .suspectedUnused {
             labels.append(.maybeUnused)
         }
+        if sub.hasMissedCharge {
+            labels.append(.missedCharge)
+        }
 
-        // Duplicate risk: another active subscription in same category with similar amount
+        // Duplicate risk: another active subscription in same category with similar name or amount
         let sameCategory = subscriptions.filter {
             $0.id != sub.id &&
             $0.status == .active &&
             $0.category == sub.category
         }
         for other in sameCategory {
+            // Check amount similarity (within 40%)
             let diff = abs(other.expectedAmount - sub.expectedAmount)
-            let threshold = max(sub.expectedAmount, other.expectedAmount) / 4 // 25%
-            if diff <= threshold {
+            let threshold = max(sub.expectedAmount, other.expectedAmount) * 2 / 5 // 40%
+            let amountSimilar = diff <= threshold
+
+            // Check name similarity
+            let nameSimilar = Self.merchantNamesSimilar(sub.merchantName, other.merchantName)
+
+            if amountSimilar || nameSimilar {
                 labels.append(.duplicateRisk)
                 break
             }
         }
 
         return labels
+    }
+
+    // MARK: - Subscription Summaries
+
+    /// Subscriptions with price increases
+    var priceIncreasedSubs: [DetectedSubscription] {
+        subscriptions.filter { $0.hasPriceIncrease && $0.status == .active }
+    }
+
+    /// Subscriptions suspected to be unused
+    var unusedSubs: [DetectedSubscription] {
+        subscriptions.filter { $0.status == .suspectedUnused }
+    }
+
+    /// Subscriptions with missed charges
+    var missedChargeSubs: [DetectedSubscription] {
+        subscriptions.filter { $0.hasMissedCharge }
+    }
+
+    /// Total potential monthly savings from unused + cancelled subscriptions
+    var potentialMonthlySavings: Int {
+        unusedSubs.reduce(0) { $0 + $1.monthlyCost }
+    }
+
+    /// Active subscriptions renewing within N days
+    func renewingWithin(days: Int) -> [DetectedSubscription] {
+        subscriptions.filter { sub in
+            guard sub.status == .active, let d = sub.daysUntilRenewal else { return false }
+            return d >= 0 && d <= days
+        }.sorted { ($0.daysUntilRenewal ?? 99) < ($1.daysUntilRenewal ?? 99) }
+    }
+
+    /// Quick summary snapshot for the dashboard
+    var dashboardSnapshot: SubscriptionSnapshot {
+        SubscriptionSnapshot(
+            activeCount: activeCount,
+            monthlyTotal: monthlyTotal,
+            yearlyTotal: yearlyTotal,
+            renewingSoon: renewingWithin(days: 7).count,
+            unusedCount: unusedSubs.count,
+            priceIncreaseCount: priceIncreasedSubs.count,
+            missedChargeCount: missedChargeSubs.count,
+            potentialSavings: potentialMonthlySavings
+        )
+    }
+
+    /// Check if two merchant names are likely the same service
+    nonisolated static func merchantNamesSimilar(_ a: String, _ b: String) -> Bool {
+        let na = a.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let nb = b.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if na == nb { return true }
+        // Check if one contains the other (e.g. "spotify" in "spotify premium")
+        if na.contains(nb) || nb.contains(na) { return true }
+        // Check first word match (e.g. "netflix" == "netflix hd")
+        let aFirst = na.split(separator: " ").first.map(String.init) ?? na
+        let bFirst = nb.split(separator: " ").first.map(String.init) ?? nb
+        if aFirst == bFirst && aFirst.count >= 4 { return true }
+        return false
     }
 
     // MARK: - Pure Detection Logic (off main thread)
@@ -298,15 +402,28 @@ class SubscriptionEngine: ObservableObject {
             globalInsights.append(.maybeUnused)
         }
 
-        // Duplicate risk check
+        // Missed charge check
+        if all.contains(where: { $0.hasMissedCharge }) {
+            globalInsights.append(.missedCharge)
+        }
+
+        // Duplicate risk check — broader: same category + similar name OR similar amount
         let activeSubs = all.filter { $0.status == .active }
         var hasDuplicate = false
         for i in 0..<activeSubs.count {
             for j in (i+1)..<activeSubs.count {
                 if activeSubs[i].category == activeSubs[j].category {
+                    // Amount similarity
                     let diff = abs(activeSubs[i].expectedAmount - activeSubs[j].expectedAmount)
-                    let threshold = max(activeSubs[i].expectedAmount, activeSubs[j].expectedAmount) / 4
-                    if diff <= threshold {
+                    let threshold = max(activeSubs[i].expectedAmount, activeSubs[j].expectedAmount) * 2 / 5
+                    let amountSimilar = diff <= threshold
+
+                    // Name similarity
+                    let nameSimilar = merchantNamesSimilar(
+                        activeSubs[i].merchantName, activeSubs[j].merchantName
+                    )
+
+                    if amountSimilar || nameSimilar {
                         hasDuplicate = true
                         break
                     }
@@ -316,6 +433,11 @@ class SubscriptionEngine: ObservableObject {
         }
         if hasDuplicate {
             globalInsights.append(.duplicateRisk)
+        }
+
+        // Newly detected (subscriptions with only 2-3 charges)
+        if all.contains(where: { $0.chargeHistory.count <= 3 && $0.isAutoDetected && $0.status == .active }) {
+            globalInsights.append(.newlyDetected)
         }
 
         return DetectionResult(subscriptions: all, globalInsights: globalInsights)
@@ -337,12 +459,45 @@ class SubscriptionEngine: ObservableObject {
         return groups
     }
 
-    /// Normalize merchant name: lowercase, trim whitespace, collapse multiple spaces
+    /// Normalize merchant name for subscription grouping.
+    /// Strips payment processor prefixes, trailing reference numbers,
+    /// common suffixes, and collapses whitespace.
     nonisolated private static func normalizeMerchant(_ name: String) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // Collapse whitespace
-        let components = trimmed.split(separator: " ").map(String.init)
-        return components.joined(separator: " ")
+        var result = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        // Remove common payment processor prefixes
+        let prefixes = ["pp*", "sp ", "sq *", "paypal *", "google *", "apple.com/bill", "amzn ", "ach "]
+        for prefix in prefixes {
+            if result.hasPrefix(prefix) {
+                result = String(result.dropFirst(prefix.count))
+            }
+        }
+
+        // Remove trailing reference/transaction numbers (e.g. "#12345", "- 8923")
+        result = result.replacingOccurrences(
+            of: "[\\s]*[-#*]+[\\s]*[0-9a-f]{3,}$",
+            with: "",
+            options: .regularExpression
+        )
+
+        // Remove trailing country codes and city names in all-caps after merchant
+        result = result.replacingOccurrences(
+            of: "\\s+(us|uk|nl|de|fr|ie|gb|ca|au)$",
+            with: "",
+            options: .regularExpression
+        )
+
+        // Strip common suffixes
+        let suffixes = [".com", ".io", ".co", " inc", " llc", " ltd", " bv", " gmbh"]
+        for suffix in suffixes {
+            if result.hasSuffix(suffix) {
+                result = String(result.dropLast(suffix.count))
+            }
+        }
+
+        // Collapse whitespace and trim
+        let components = result.split(separator: " ").map(String.init)
+        return components.joined(separator: " ").trimmingCharacters(in: .punctuationCharacters)
     }
 
     /// Detect billing cycle from median interval in days
@@ -372,5 +527,37 @@ class SubscriptionEngine: ObservableObject {
     /// Alias for amounts
     nonisolated private static func medianInt(_ values: [Int]) -> Int {
         median(values)
+    }
+}
+
+// MARK: - Subscription Snapshot (value type for dashboard)
+
+struct SubscriptionSnapshot {
+    let activeCount: Int
+    let monthlyTotal: Int
+    let yearlyTotal: Int
+    let renewingSoon: Int       // renewing within 7 days
+    let unusedCount: Int
+    let priceIncreaseCount: Int
+    let missedChargeCount: Int
+    let potentialSavings: Int   // monthly savings if unused subs cancelled
+
+    /// Whether there are alerts worth showing on the dashboard
+    var hasAlerts: Bool {
+        unusedCount > 0 || priceIncreaseCount > 0 || missedChargeCount > 0
+    }
+
+    /// Most important alert text for the dashboard
+    var urgentSummary: String? {
+        if missedChargeCount > 0 {
+            return "\(missedChargeCount) missed charge\(missedChargeCount == 1 ? "" : "s") — verify status"
+        }
+        if priceIncreaseCount > 0 {
+            return "\(priceIncreaseCount) subscription\(priceIncreaseCount == 1 ? "" : "s") had a price increase"
+        }
+        if unusedCount > 0 {
+            return "\(unusedCount) possibly unused — save \(DS.Format.money(potentialSavings))/mo"
+        }
+        return nil
     }
 }

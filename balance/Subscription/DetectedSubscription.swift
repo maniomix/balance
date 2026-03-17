@@ -50,12 +50,13 @@ enum BillingCycle: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Convert amount to monthly equivalent (cents)
+    /// Convert amount to monthly equivalent (cents).
+    /// Uses precise conversion: weekly × 52 / 12, yearly rounds to nearest cent.
     func toMonthly(amount: Int) -> Int {
         switch self {
-        case .weekly: return amount * 4
+        case .weekly: return (amount * 52 + 6) / 12   // round to nearest
         case .monthly: return amount
-        case .yearly: return amount / 12
+        case .yearly: return (amount + 6) / 12         // round to nearest
         case .custom: return amount
         }
     }
@@ -231,12 +232,14 @@ struct DetectedSubscription: Identifiable, Codable, Hashable {
         return Calendar.current.dateComponents([.day], from: Date(), to: next).day
     }
 
-    /// Whether a price increase was detected
+    /// Whether a meaningful price increase was detected (>2% of previous charge)
     var hasPriceIncrease: Bool {
         guard chargeHistory.count >= 2 else { return false }
         let sorted = chargeHistory.sorted { $0.date < $1.date }
         guard let prev = sorted.dropLast().last, let last = sorted.last else { return false }
-        return last.amount > prev.amount
+        guard prev.amount > 0 else { return false }
+        let increaseRatio = Double(last.amount - prev.amount) / Double(prev.amount)
+        return increaseRatio > 0.02 // >2% increase
     }
 
     /// Price increase amount in cents (positive = went up)
@@ -244,12 +247,36 @@ struct DetectedSubscription: Identifiable, Codable, Hashable {
         guard chargeHistory.count >= 2 else { return nil }
         let sorted = chargeHistory.sorted { $0.date < $1.date }
         guard let prev = sorted.dropLast().last, let last = sorted.last else { return nil }
-        return last.amount - prev.amount
+        let diff = last.amount - prev.amount
+        return diff != 0 ? diff : nil
+    }
+
+    /// Price increase as a percentage (e.g. 5.2 means 5.2% increase)
+    var priceChangePercent: Double? {
+        guard chargeHistory.count >= 2 else { return nil }
+        let sorted = chargeHistory.sorted { $0.date < $1.date }
+        guard let prev = sorted.dropLast().last, let last = sorted.last else { return nil }
+        guard prev.amount > 0 else { return nil }
+        let pct = Double(last.amount - prev.amount) / Double(prev.amount) * 100.0
+        return abs(pct) >= 0.5 ? pct : nil // only report if ≥0.5%
     }
 
     /// Whether this subscription is likely unused (no recent interaction hints)
     var isLikelyUnused: Bool {
         status == .suspectedUnused
+    }
+
+    /// Days since the most recent charge (nil if no history)
+    var daysSinceLastCharge: Int? {
+        guard let last = lastChargeDate else { return nil }
+        return Calendar.current.dateComponents([.day], from: last, to: Date()).day
+    }
+
+    /// Whether the expected next charge was missed (past due by >5 days)
+    var hasMissedCharge: Bool {
+        guard let next = nextRenewalDate, status == .active else { return false }
+        let days = Calendar.current.dateComponents([.day], from: next, to: Date()).day ?? 0
+        return days > 5 // overdue by more than 5 days
     }
 }
 

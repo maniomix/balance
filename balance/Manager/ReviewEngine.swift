@@ -42,10 +42,27 @@ class ReviewEngine: ObservableObject {
     @Published var isLoading = false
     @Published var lastAnalyzedAt: Date?
 
-    // Dismissed item IDs persist so they don't reappear
-    private var dismissedTransactionKeys: Set<String> = []
+    // Dismissed item IDs persist across app launches so they don't reappear
+    private var dismissedTransactionKeys: Set<String> = [] {
+        didSet { saveDismissedKeys() }
+    }
 
-    private init() {}
+    private static let dismissedKeysKey = "review.dismissed_keys"
+
+    private init() {
+        loadDismissedKeys()
+    }
+
+    private func loadDismissedKeys() {
+        let arr = UserDefaults.standard.stringArray(forKey: Self.dismissedKeysKey) ?? []
+        dismissedTransactionKeys = Set(arr)
+    }
+
+    private func saveDismissedKeys() {
+        // Cap at 500 entries to avoid unbounded growth
+        let capped = Array(dismissedTransactionKeys.suffix(500))
+        UserDefaults.standard.set(capped, forKey: Self.dismissedKeysKey)
+    }
 
     // MARK: - Summary Stats
 
@@ -65,6 +82,18 @@ class ReviewEngine: ObservableObject {
         items.filter { $0.status == .pending && $0.type == .possibleDuplicate }.count
     }
 
+    var spikeCount: Int {
+        items.filter { $0.status == .pending && $0.type == .spendingSpike }.count
+    }
+
+    var recurringCandidateCount: Int {
+        items.filter { $0.status == .pending && $0.type == .recurringCandidate }.count
+    }
+
+    var merchantNormCount: Int {
+        items.filter { $0.status == .pending && $0.type == .merchantNormalization }.count
+    }
+
     var pendingItems: [ReviewItem] {
         items
             .filter { $0.status == .pending }
@@ -73,6 +102,27 @@ class ReviewEngine: ObservableObject {
 
     func pendingByType(_ type: ReviewType) -> [ReviewItem] {
         items.filter { $0.status == .pending && $0.type == type }
+    }
+
+    /// Total amount at risk from potential duplicates (sum of duplicate amounts)
+    var duplicateRiskAmount: Int {
+        pendingByType(.possibleDuplicate).reduce(0) { total, item in
+            total + (item.spikeAmount ?? 0) // spikeAmount is reused, but for duplicates we sum tx amounts
+        }
+    }
+
+    /// Quick summary snapshot for the dashboard
+    var dashboardSnapshot: ReviewSnapshot {
+        ReviewSnapshot(
+            pendingCount: pendingCount,
+            highPriorityCount: highPriorityCount,
+            duplicateCount: duplicateCount,
+            uncategorizedCount: uncategorizedCount,
+            spikeCount: spikeCount,
+            recurringCandidateCount: recurringCandidateCount,
+            topIssueReason: pendingItems.first?.reason,
+            topIssueType: pendingItems.first?.type
+        )
     }
 
     // MARK: - Main Analysis
@@ -294,6 +344,10 @@ class ReviewEngine: ObservableObject {
 
     // MARK: Rule 2: Possible Duplicates
 
+    /// Stronger duplicate detection:
+    /// - Allows ±2 days (not just ±1)
+    /// - Allows amounts within 5% of each other (not just exact match)
+    /// - Weights: exact amount + same day = high, near-match = medium
     nonisolated private static func detectDuplicates(_ transactions: [Transaction]) -> [ReviewItem] {
         var items: [ReviewItem] = []
         var processed = Set<UUID>()
@@ -303,23 +357,27 @@ class ReviewEngine: ObservableObject {
 
         for i in 0..<sorted.count {
             guard !processed.contains(sorted[i].id) else { continue }
+            guard sorted[i].type == .expense else { continue }
 
             var group: [Transaction] = [sorted[i]]
 
             for j in (i+1)..<sorted.count {
                 guard !processed.contains(sorted[j].id) else { continue }
 
-                // Same amount
-                guard sorted[i].amount == sorted[j].amount else { continue }
-
-                // Same day or ±1 day
+                // Within ±2 days
                 let daysDiff = abs(cal.dateComponents([.day], from: sorted[i].date, to: sorted[j].date).day ?? 99)
-                guard daysDiff <= 1 else { continue }
+                guard daysDiff <= 2 else { continue }
+
+                // Amount within 5% (handles slight differences like tip variations)
+                let amountDiff = abs(sorted[i].amount - sorted[j].amount)
+                let maxAmount = max(sorted[i].amount, sorted[j].amount)
+                let amountMatch = maxAmount > 0 ? Double(amountDiff) / Double(maxAmount) <= 0.05 : sorted[i].amount == sorted[j].amount
+                guard amountMatch else { continue }
 
                 // Similar note (at least one non-empty, and similar)
                 if !sorted[i].note.isEmpty && !sorted[j].note.isEmpty {
                     let similarity = stringSimilarity(sorted[i].note, sorted[j].note)
-                    guard similarity >= 0.7 else { continue }
+                    guard similarity >= 0.6 else { continue } // slightly more lenient
                 }
 
                 // Same type
@@ -335,11 +393,16 @@ class ReviewEngine: ObservableObject {
                 let names = group.map { $0.note.isEmpty ? $0.category.title : $0.note }
                 let nameStr = names.first ?? "transaction"
 
+                // Exact amount + same day = high priority; otherwise medium
+                let isExact = Set(group.map { $0.amount }).count == 1
+                let isSameDay = Set(group.map { cal.component(.day, from: $0.date) }).count == 1
+                let priority: ReviewPriority = (isExact && isSameDay) ? .high : .medium
+
                 items.append(ReviewItem(
                     transactionIds: ids,
                     type: .possibleDuplicate,
-                    priority: .high,
-                    reason: "\(group.count) charges of €\(String(format: "%.2f", Double(group[0].amount) / 100.0)) for '\(nameStr)' on the same day",
+                    priority: priority,
+                    reason: "\(group.count) charges of ~\(DS.Format.money(group[0].amount)) for '\(nameStr)' within \(isSameDay ? "the same day" : "2 days")",
                     suggestedAction: .markDuplicate,
                     duplicateGroupId: groupId
                 ))
@@ -391,9 +454,12 @@ class ReviewEngine: ObservableObject {
 
     // MARK: Rule 3: Spending Spikes
 
-    /// Detect spending spikes in the selected month.
-    /// Uses contextTransactions (broader range) to compute category averages,
-    /// then flags selected-month transactions that exceed the average.
+    /// Detect spending spikes using IQR-based outlier detection.
+    /// This is more robust than simple mean-based detection because
+    /// it's not skewed by previous spikes in the history.
+    ///
+    /// A transaction is flagged if amount > Q3 + 1.5 * IQR for its category.
+    /// Priority is high if amount > Q3 + 3.0 * IQR (extreme outlier).
     nonisolated private static func detectSpikes(
         _ monthTransactions: [Transaction],
         contextTransactions: [Transaction],
@@ -404,7 +470,7 @@ class ReviewEngine: ObservableObject {
         let monthExpenses = monthTransactions.filter { $0.type == .expense }
         let contextExpenses = contextTransactions.filter { $0.type == .expense }
 
-        // Build category averages from context transactions
+        // Build category amount distributions from context
         var contextByCategory: [String: [Int]] = [:]
         for tx in contextExpenses {
             contextByCategory[tx.category.storageKey, default: []].append(tx.amount)
@@ -412,24 +478,27 @@ class ReviewEngine: ObservableObject {
 
         for tx in monthExpenses {
             let catKey = tx.category.storageKey
-            guard let catAmounts = contextByCategory[catKey], catAmounts.count >= 3 else { continue }
+            guard let catAmounts = contextByCategory[catKey], catAmounts.count >= 4 else { continue }
 
             let sorted = catAmounts.sorted()
-            let trimCount = max(1, sorted.count / 10)
-            let trimmed = Array(sorted.dropFirst(trimCount).dropLast(trimCount))
-            let avg = trimmed.isEmpty ? (sorted.reduce(0, +) / sorted.count) : (trimmed.reduce(0, +) / trimmed.count)
+            let q1 = sorted[sorted.count / 4]
+            let q3 = sorted[sorted.count * 3 / 4]
+            let iqr = q3 - q1
+            guard iqr > 0 else { continue } // all amounts are similar, no spike possible
 
-            guard avg > 0 else { continue }
+            let mildThreshold = q3 + iqr * 3 / 2  // 1.5 × IQR
+            let extremeThreshold = q3 + iqr * 3    // 3.0 × IQR
 
-            let ratio = Double(tx.amount) / Double(avg)
-            if ratio >= 3.0 {
-                let priority: ReviewPriority = ratio >= 5.0 ? .high : .medium
+            if tx.amount > mildThreshold {
+                let avg = sorted.reduce(0, +) / sorted.count
+                let ratio = avg > 0 ? Double(tx.amount) / Double(avg) : 0
+                let priority: ReviewPriority = tx.amount > extremeThreshold ? .high : .medium
 
                 items.append(ReviewItem(
                     transactionIds: [tx.id],
                     type: .spendingSpike,
                     priority: priority,
-                    reason: "€\(String(format: "%.2f", Double(tx.amount) / 100.0)) is \(String(format: "%.1f", ratio))x the average for \(tx.category.title)",
+                    reason: "\(DS.Format.money(tx.amount)) is \(String(format: "%.1f", ratio))x the average for \(tx.category.title)",
                     suggestedAction: .reviewAmount,
                     spikeAmount: tx.amount,
                     spikeAverage: avg
@@ -551,15 +620,33 @@ class ReviewEngine: ObservableObject {
         return items
     }
 
-    /// Aggressively normalize: lowercase, remove trailing digits, trim punctuation
+    /// Aggressively normalize: lowercase, remove trailing digits, strip payment
+    /// processor prefixes, strip common suffixes, trim punctuation.
     nonisolated private static func aggressiveNormalize(_ name: String) -> String {
         var result = name.lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Remove payment processor prefixes
+        let prefixes = ["pp*", "sp ", "sq *", "paypal *", "google *", "apple.com/bill ", "amzn "]
+        for prefix in prefixes {
+            if result.hasPrefix(prefix) {
+                result = String(result.dropFirst(prefix.count))
+            }
+        }
+
         // Remove trailing digits and special chars (e.g., "Netflix #123" → "netflix")
-        result = result.replacingOccurrences(of: "[#*0-9]+$", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "[\\s]*[-#*]+[\\s]*[0-9a-f]{2,}$", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: .punctuationCharacters)
+
+        // Remove common suffixes
+        let suffixes = [".com", ".io", ".co", " inc", " llc", " ltd", " bv", " gmbh"]
+        for suffix in suffixes {
+            if result.hasSuffix(suffix) {
+                result = String(result.dropLast(suffix.count))
+            }
+        }
+
+        result = result.trimmingCharacters(in: .punctuationCharacters)
 
         // Collapse multiple spaces
         let parts = result.split(separator: " ").map(String.init)
@@ -572,5 +659,37 @@ class ReviewEngine: ObservableObject {
         if count == 0 { return 0 }
         if count % 2 == 0 { return (sorted[count/2 - 1] + sorted[count/2]) / 2 }
         return sorted[count/2]
+    }
+}
+
+// MARK: - Review Snapshot (value type for dashboard)
+
+struct ReviewSnapshot {
+    let pendingCount: Int
+    let highPriorityCount: Int
+    let duplicateCount: Int
+    let uncategorizedCount: Int
+    let spikeCount: Int
+    let recurringCandidateCount: Int
+    let topIssueReason: String?
+    let topIssueType: ReviewType?
+
+    /// Whether there are alerts worth showing on the dashboard
+    var hasAlerts: Bool {
+        highPriorityCount > 0 || duplicateCount > 0
+    }
+
+    /// Most important alert text for the dashboard
+    var urgentSummary: String? {
+        if duplicateCount > 0 {
+            return "\(duplicateCount) possible duplicate\(duplicateCount == 1 ? "" : "s") — review to avoid double charges"
+        }
+        if spikeCount > 0 {
+            return "\(spikeCount) unusual spending spike\(spikeCount == 1 ? "" : "s") detected"
+        }
+        if uncategorizedCount > 0 {
+            return "\(uncategorizedCount) transaction\(uncategorizedCount == 1 ? "" : "s") need categorizing"
+        }
+        return nil
     }
 }

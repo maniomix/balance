@@ -92,6 +92,43 @@ struct ForecastDetailView: View {
                     Divider().overlay(DS.Colors.grid)
                     calcRow("Safe to spend", f.safeToSpend.totalAmount, add: true, bold: true)
                 }
+
+                // Budget missing warning
+                if f.budgetIsMissing {
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 11))
+                        Text("No budget set — using income history as estimate. Set a monthly budget for more accurate guidance.")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(DS.Colors.warning)
+                    .padding(10)
+                    .background(DS.Colors.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                // Overcommitted warning
+                if f.safeToSpend.isOvercommitted {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                        Text("Bills and goal contributions exceed your remaining budget by \(DS.Format.money(f.safeToSpend.overcommitAmount)). Consider adjusting your goals or budget.")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(DS.Colors.danger)
+                    .padding(10)
+                    .background(DS.Colors.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                // Data confidence
+                HStack(spacing: 4) {
+                    Image(systemName: f.dataConfidence.icon)
+                        .font(.system(size: 10))
+                    Text(f.dataConfidence.label)
+                        .font(.system(size: 10, weight: .medium))
+                    Text("· \(f.monthsOfData) month\(f.monthsOfData == 1 ? "" : "s") of data")
+                        .font(.system(size: 10))
+                }
+                .foregroundStyle(DS.Colors.subtext.opacity(0.7))
             }
         }
     }

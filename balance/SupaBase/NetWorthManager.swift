@@ -22,7 +22,10 @@ class NetWorthManager: ObservableObject {
     
     func computeSummary() async {
         isLoading = true
-        
+
+        // Fetch fresh account data before computing to avoid stale balances
+        await accountManager.fetchAccounts()
+
         let totalAssets = accountManager.totalAssets
         let totalLiabilities = accountManager.totalLiabilities
         let currentNetWorth = totalAssets - totalLiabilities

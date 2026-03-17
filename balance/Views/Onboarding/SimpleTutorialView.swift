@@ -39,27 +39,27 @@ struct SimpleTutorialView: View {
     
     var body: some View {
         ZStack {
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea()
-            
+            DS.Colors.bg.ignoresSafeArea()
+
             VStack(spacing: 0) {
                 // Header
                 HStack {
                     Text("Tutorial")
-                        .font(.system(size: 28, weight: .bold))
-                    
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.Colors.text)
+
                     Spacer()
-                    
+
                     Button {
                         onboardingManager.skipOnboarding()
                     } label: {
                         Text("Skip")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.blue)
+                            .foregroundStyle(DS.Colors.accent)
                     }
                 }
                 .padding()
-                
+
                 // Steps
                 TabView(selection: $onboardingManager.currentStep) {
                     ForEach(0..<steps.count, id: \.self) { index in
@@ -69,7 +69,7 @@ struct SimpleTutorialView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .always))
                 .indexViewStyle(.page(backgroundDisplayMode: .always))
-                
+
                 // Bottom buttons
                 HStack(spacing: 16) {
                     if onboardingManager.currentStep > 0 {
@@ -82,13 +82,13 @@ struct SimpleTutorialView: View {
                                 Image(systemName: "chevron.left")
                                 Text("Back")
                             }
-                            .foregroundColor(.blue)
+                            .foregroundStyle(DS.Colors.accent)
                             .padding()
                         }
                     }
-                    
+
                     Spacer()
-                    
+
                     Button {
                         withAnimation {
                             if onboardingManager.currentStep < steps.count - 1 {
@@ -99,17 +99,16 @@ struct SimpleTutorialView: View {
                         }
                     } label: {
                         HStack {
-                            Text(onboardingManager.currentStep < steps.count - 1 ? "Next" : "Done")
+                            Text(onboardingManager.currentStep < steps.count - 1 ? "Next" : "Get Started")
                             if onboardingManager.currentStep < steps.count - 1 {
                                 Image(systemName: "chevron.right")
                             }
                         }
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 32)
                         .padding(.vertical, 12)
-                        .background(Color.blue)
-                        .cornerRadius(12)
+                        .background(DS.Colors.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
                 .padding()
@@ -129,29 +128,30 @@ struct TutorialStep {
 // MARK: - Step View
 struct StepView: View {
     let step: TutorialStep
-    
+
     var body: some View {
         VStack(spacing: 32) {
             Spacer()
-            
+
             // Icon
             Image(systemName: step.icon)
                 .font(.system(size: 80))
-                .foregroundColor(step.color)
-            
+                .foregroundStyle(step.color)
+
             // Content
             VStack(spacing: 16) {
                 Text(step.title)
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(DS.Colors.text)
                     .multilineTextAlignment(.center)
-                
+
                 Text(step.description)
                     .font(.system(size: 18))
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(DS.Colors.subtext)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
-            
+
             Spacer()
         }
     }

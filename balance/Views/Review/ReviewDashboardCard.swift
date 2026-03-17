@@ -60,13 +60,19 @@ struct ReviewDashboardCard: View {
 
                         Spacer()
 
-                        // Tags
+                        // Tags — show the most important categories
                         VStack(alignment: .trailing, spacing: 4) {
-                            if engine.uncategorizedCount > 0 {
-                                tagPill("\(engine.uncategorizedCount) uncategorized", DS.Colors.warning)
-                            }
                             if engine.duplicateCount > 0 {
                                 tagPill("\(engine.duplicateCount) duplicate", DS.Colors.danger)
+                            }
+                            if engine.spikeCount > 0 {
+                                tagPill("\(engine.spikeCount) spike", Color(hexValue: 0x9B59B6))
+                            }
+                            if engine.uncategorizedCount > 0 {
+                                tagPill("\(engine.uncategorizedCount) uncat.", DS.Colors.warning)
+                            }
+                            if engine.recurringCandidateCount > 0 && engine.duplicateCount == 0 && engine.spikeCount == 0 {
+                                tagPill("\(engine.recurringCandidateCount) recurring", DS.Colors.accent)
                             }
                         }
 

@@ -224,8 +224,8 @@ struct OnboardingOverlay: View {
 
 // MARK: - Tutorial Card View (برای Settings)
 struct TutorialCardView: View {
-    @StateObject private var onboardingManager = OnboardingManager()
-    
+    @StateObject private var onboardingManager = OnboardingManager.shared
+
     var body: some View {
         Button {
             onboardingManager.resetOnboarding()
@@ -287,52 +287,50 @@ extension View {
 // MARK: - Welcome Screen (اولین بار)
 struct WelcomeView: View {
     @ObservedObject var onboardingManager: OnboardingManager
-    
+
     var body: some View {
         VStack(spacing: 32) {
             Spacer()
-            
+
             // App Icon
             Image(systemName: "chart.pie.fill")
                 .font(.system(size: 80))
-                .foregroundColor(.blue)
-            
+                .foregroundStyle(DS.Colors.accent)
+
             VStack(spacing: 12) {
                 Text("Welcome to Centmond!")
-                    .font(.system(size: 32, weight: .bold))
-                
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundStyle(DS.Colors.text)
+
                 Text("Take control of your finances")
                     .font(.system(size: 18))
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(DS.Colors.subtext)
             }
-            
+
             Spacer()
-            
+
             VStack(spacing: 16) {
                 Button {
                     onboardingManager.startOnboarding()
                 } label: {
                     Text("Start Tutorial")
                         .font(.headline)
-                        .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .cornerRadius(16)
                 }
-                
+                .buttonStyle(DS.PrimaryButton())
+
                 Button {
                     onboardingManager.skipOnboarding()
                 } label: {
                     Text("Skip for now")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(DS.Colors.subtext)
                 }
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(DS.Colors.bg.ignoresSafeArea())
     }
 }
 

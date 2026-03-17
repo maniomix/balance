@@ -69,8 +69,11 @@ struct SupabaseTestView: View {
                 testResult += "\n🎉 All tests passed!"
                 
             } catch {
-                testResult = "❌ Error: \(error.localizedDescription)"
-                print("Full error: \(error)")
+                testResult = AppConfig.shared.safeErrorMessage(
+                    detail: error.localizedDescription,
+                    fallback: "Connection test failed. Check your configuration."
+                )
+                SecureLogger.error("Supabase connection test failed", error)
             }
             
             isLoading = false

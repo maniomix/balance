@@ -370,6 +370,45 @@ enum InviteStatus: String, Codable, Hashable {
     case expired
 }
 
+// MARK: - Household Snapshot (Dashboard)
+
+struct HouseholdSnapshot {
+    let memberCount: Int
+    let hasPartner: Bool
+    let sharedSpending: Int          // cents this month
+    let sharedBudget: Int            // cents budget this month (0 = not set)
+    let budgetUtilization: Double?   // 0.0–1.0+ (nil = no budget)
+    let isOverBudget: Bool
+    let unsettledCount: Int
+    let unsettledAmount: Int         // total cents unsettled
+    let youOwe: Int                  // cents you owe others
+    let owedToYou: Int               // cents others owe you
+    let activeSharedGoalCount: Int
+    let topGoal: SharedGoal?
+    let totalGoalProgress: Int       // 0–100 overall progress %
+    let pendingInviteCount: Int
+
+    var hasAlerts: Bool {
+        isOverBudget || unsettledCount > 3 || youOwe > 0 || !hasPartner
+    }
+
+    var urgentSummary: String? {
+        if isOverBudget {
+            return "Shared spending is over budget"
+        }
+        if youOwe > 0 {
+            return "You have an unsettled balance"
+        }
+        if unsettledCount > 3 {
+            return "\(unsettledCount) expenses need settling"
+        }
+        if !hasPartner && memberCount <= 1 {
+            return "Invite your partner to get started"
+        }
+        return nil
+    }
+}
+
 // MARK: - Shared Goal
 
 struct SharedGoal: Identifiable, Codable, Hashable {
@@ -407,8 +446,18 @@ struct SharedGoal: Identifiable, Codable, Hashable {
 
     var progress: Double {
         guard targetAmount > 0 else { return 0 }
-        return Double(currentAmount) / Double(targetAmount)
+        return min(1.0, Double(currentAmount) / Double(targetAmount))
     }
 
     var isCompleted: Bool { currentAmount >= targetAmount }
+
+    /// Remaining amount to reach the target (cents).
+    var remainingAmount: Int {
+        max(0, targetAmount - currentAmount)
+    }
+
+    /// Progress as an integer percentage (0–100).
+    var progressPercent: Int {
+        Int(progress * 100)
+    }
 }

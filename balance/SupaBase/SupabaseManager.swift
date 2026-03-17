@@ -389,10 +389,16 @@ class SupabaseManager: ObservableObject {
     }
     
     func deleteTransaction(_ transactionId: UUID) async throws {
+        guard let userId = currentUser?.id.uuidString.lowercased() else {
+            SecureLogger.warning("deleteTransaction: No authenticated user")
+            throw NSError(domain: "SupabaseManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
+        }
+
         try await client.database
             .from("transactions")
             .delete()
             .eq("id", value: transactionId.uuidString.lowercased())
+            .eq("user_id", value: userId)
             .execute()
     }
     
@@ -535,6 +541,13 @@ class SupabaseManager: ObservableObject {
     /// حذف کامل داده‌های یک ماه از Supabase
     /// شامل: transactions, budgets, category_budgets
     func deleteMonthData(userId: String, monthKey: String) async throws {
+        // Validate the caller's userId matches the authenticated user
+        guard let currentId = currentUser?.id.uuidString.lowercased(),
+              userId.lowercased() == currentId else {
+            SecureLogger.security("deleteMonthData: userId mismatch with authenticated user")
+            throw NSError(domain: "SupabaseManager", code: 403, userInfo: [NSLocalizedDescriptionKey: "Permission denied"])
+        }
+
         let userIdLower = userId.lowercased()
 
         SecureLogger.debug("Deleting month data from Supabase")

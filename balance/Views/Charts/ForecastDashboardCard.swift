@@ -49,7 +49,7 @@ struct SafeToSpendCard: View {
 
                         Spacer()
 
-                        // Right: risk badge + chevron
+                        // Right: risk badge + confidence + chevron
                         VStack(alignment: .trailing, spacing: 6) {
                             Text(f.riskLevel.label)
                                 .font(.system(size: 10, weight: .bold))
@@ -57,6 +57,16 @@ struct SafeToSpendCard: View {
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
                                 .background(f.riskLevel.color.opacity(0.1), in: Capsule())
+
+                            if f.budgetIsMissing {
+                                HStack(spacing: 2) {
+                                    Image(systemName: "info.circle")
+                                        .font(.system(size: 8))
+                                    Text("Est.")
+                                        .font(.system(size: 9, weight: .medium))
+                                }
+                                .foregroundStyle(DS.Colors.subtext.opacity(0.6))
+                            }
 
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 10, weight: .semibold))

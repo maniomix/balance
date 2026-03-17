@@ -91,22 +91,33 @@ class GoalManager: ObservableObject {
     // MARK: - Delete Goal
 
     func deleteGoal(_ goal: Goal) async -> Bool {
+        guard let userId = currentUserId else {
+            SecureLogger.warning("deleteGoal: No authenticated user")
+            return false
+        }
+
         do {
-            // Delete contributions first
+            // Delete contributions first (scoped to user's goal)
             try await client.from("goal_contributions")
                 .delete()
                 .eq("goal_id", value: goal.id.uuidString)
                 .execute()
 
+            // Delete the goal itself — filter by user_id to prevent cross-user deletion
             try await client.from("goals")
                 .delete()
                 .eq("id", value: goal.id.uuidString)
+                .eq("user_id", value: userId)
                 .execute()
 
             await fetchGoals()
             return true
         } catch {
-            errorMessage = AppConfig.shared.safeErrorMessage(detail: error.localizedDescription)
+            errorMessage = AppConfig.shared.safeErrorMessage(
+                detail: error.localizedDescription,
+                fallback: "Could not delete goal. Please try again."
+            )
+            SecureLogger.error("Delete goal failed", error)
             return false
         }
     }
@@ -315,6 +326,92 @@ class GoalManager: ObservableObject {
     /// Goals that are behind schedule
     var behindGoals: [Goal] {
         activeGoals.filter { $0.trackingStatus == .behind }
+    }
+
+    /// Goals that are overdue (past deadline, not completed)
+    var overdueGoals: [Goal] {
+        activeGoals.filter { $0.isOverdue }
+    }
+
+    /// Total required monthly contributions across all active goals with deadlines
+    var totalRequiredMonthly: Int {
+        activeGoals.compactMap { $0.requiredMonthlySaving }.reduce(0, +)
+    }
+
+    /// The single most urgent goal: overdue first, then behind-schedule closest to deadline
+    var mostUrgentGoal: Goal? {
+        // Overdue goals first (sorted by how overdue)
+        if let overdue = overdueGoals.sorted(by: {
+            ($0.targetDate ?? .distantPast) < ($1.targetDate ?? .distantPast)
+        }).first {
+            return overdue
+        }
+        // Behind schedule, closest deadline
+        if let behind = behindGoals.sorted(by: {
+            ($0.targetDate ?? .distantFuture) < ($1.targetDate ?? .distantFuture)
+        }).first {
+            return behind
+        }
+        // Closest upcoming deadline
+        return upcomingDeadlines.first
+    }
+
+    // MARK: - Planning Insights
+
+    /// Generates a snapshot of planning insights for the dashboard.
+    /// This is a synchronous read of current state — no async fetches needed.
+    var planningSnapshot: PlanningSnapshot {
+        let behind = behindGoals
+        let overdue = overdueGoals
+        let urgent = mostUrgentGoal
+        let totalRequired = totalRequiredMonthly
+        let active = activeGoals
+
+        return PlanningSnapshot(
+            activeGoalCount: active.count,
+            behindCount: behind.count,
+            overdueCount: overdue.count,
+            totalRequiredMonthly: totalRequired,
+            mostUrgentGoal: urgent,
+            totalSaved: totalSaved,
+            totalTarget: totalTarget,
+            overallProgress: overallProgress
+        )
+    }
+}
+
+// MARK: - Planning Snapshot (value type for dashboard)
+
+struct PlanningSnapshot {
+    let activeGoalCount: Int
+    let behindCount: Int
+    let overdueCount: Int
+    let totalRequiredMonthly: Int
+    let mostUrgentGoal: Goal?
+    let totalSaved: Int
+    let totalTarget: Int
+    let overallProgress: Double
+
+    /// Whether there are any planning alerts worth showing
+    var hasAlerts: Bool {
+        overdueCount > 0 || behindCount > 0
+    }
+
+    /// Human-readable summary line for the most urgent issue
+    var urgentSummary: String? {
+        if overdueCount > 0 {
+            if let goal = mostUrgentGoal {
+                return "\(goal.name) is overdue — \(DS.Format.money(goal.remainingAmount)) still needed"
+            }
+            return "\(overdueCount) goal\(overdueCount == 1 ? " is" : "s are") overdue"
+        }
+        if behindCount > 0 {
+            if let goal = mostUrgentGoal {
+                return "\(goal.name) is behind schedule"
+            }
+            return "\(behindCount) goal\(behindCount == 1 ? " is" : "s are") behind schedule"
+        }
+        return nil
     }
 }
 

@@ -152,46 +152,28 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     EmailVerificationBanner()
                     
-                    TabView(selection: $selectedTab){
-                DashboardView(store: $store, goToBudget: { selectedTab = .budget })
-                    .tabItem { Label("Dashboard", systemImage: "gauge.with.dots.needle.50percent") }
-                    .tag(Tab.dashboard)
+                    TabView(selection: $selectedTab) {
+                        DashboardView(store: $store, goToBudget: { selectedTab = .budget }, goToTransactions: { selectedTab = .transactions })
+                            .tabItem { Label("Home", systemImage: "gauge.with.dots.needle.50percent") }
+                            .tag(Tab.dashboard)
 
-                TransactionsView(store: $store, goToBudget: { selectedTab = .budget })
-                    .tabItem { Label("Transactions", systemImage: "list.bullet.rectangle") }
-                    .tag(Tab.transactions)
+                        TransactionsView(store: $store, goToBudget: { selectedTab = .budget })
+                            .tabItem { Label("Transactions", systemImage: "list.bullet.rectangle") }
+                            .tag(Tab.transactions)
 
-                BudgetView(store: $store)
-                    .tabItem { Label("Budget", systemImage: "target") }
-                    .tag(Tab.budget)
+                        BudgetView(store: $store)
+                            .tabItem { Label("Budget", systemImage: "target") }
+                            .tag(Tab.budget)
 
-                InsightsView(store: $store, goToBudget: { selectedTab = .budget })
-                    .tabItem { Label("Insights", systemImage: "sparkles") }
-                    .tag(Tab.insights)
+                        InsightsView(store: $store, goToBudget: { selectedTab = .budget })
+                            .tabItem { Label("Insights", systemImage: "sparkles") }
+                            .tag(Tab.insights)
 
-                AccountsListView()
-                .tabItem { Label("Accounts", systemImage: "building.columns") }
-                .tag(Tab.accounts)
-
-                GoalsOverviewView()
-                .tabItem { Label("Goals", systemImage: "target") }
-                .tag(Tab.goals)
-
-                SubscriptionsOverviewView()
-                .tabItem { Label("Subscriptions", systemImage: "creditcard.and.123") }
-                .tag(Tab.subscriptions)
-
-                NavigationStack {
-                    HouseholdOverviewView(store: $store)
-                }
-                .tabItem { Label("Household", systemImage: "person.2") }
-                .tag(Tab.household)
-
-                SettingsView(store: $store)
-                .tabItem { Label("Settings", systemImage: "gearshape") }
-                .tag(Tab.settings)
-            }
-            .environmentObject(supabaseManager)
+                        MoreView(store: $store, selectedTab: $selectedTab)
+                            .tabItem { Label("More", systemImage: "ellipsis.circle") }
+                            .tag(Tab.more)
+                    }
+                    .environmentObject(supabaseManager)
             .onChange(of: selectedTab) { _, newTab in
                 Haptics.selection()
                 AnalyticsManager.shared.track(.tabSwitched(tab: "\(newTab)"))
@@ -252,9 +234,9 @@ struct ContentView: View {
                 switch url.host {
                 case "dashboard":       selectedTab = .dashboard
                 case "budget":          selectedTab = .budget
-                case "subscriptions":   selectedTab = .subscriptions
+                case "subscriptions":   selectedTab = .more
                 case "forecast":        selectedTab = .insights
-                case "accounts":        selectedTab = .accounts
+                case "accounts":        selectedTab = .more
                 default: break
                 }
             }
@@ -320,7 +302,7 @@ struct ContentView: View {
     }
 }
 
-enum Tab: Hashable { case dashboard, transactions, budget, insights, accounts, goals, subscriptions, household, settings }
+enum Tab: Hashable { case dashboard, transactions, budget, insights, more, accounts, goals, subscriptions, household, settings }
 // Shared category list used across views
 private var categories: [Category] { Category.allCases }
 
@@ -716,6 +698,7 @@ private struct LaunchScreenView: View {
 private struct DashboardView: View {
     @Binding var store: Store
     let goToBudget: () -> Void
+    var goToTransactions: (() -> Void)? = nil
     @State private var showAdd = false
     @State private var trendSelectedDay: Int? = nil
     @StateObject private var subscriptionManager = SubscriptionManager.shared
@@ -764,16 +747,36 @@ private struct DashboardView: View {
                     if store.budgetTotal <= 0 {
                         SetupCard(goToBudget: goToBudget)
                     } else {
+                        // Financial snapshot
                         kpis
+
+                        // Daily trend right below KPIs
                         trendCard
+
                         SafeToSpendCard()
-                        ForecastDashboardCard()
+
+                        // Activity & upcoming
+                        UpcomingBillsDashboardCard()
+
+                        // Categories
                         categoryCard
-                        ReviewDashboardCard(store: $store)
+
+                        // Projections & wealth
+                        ForecastDashboardCard()
                         NetWorthDashboardCard()
+
+                        // Planning guidance
+                        PlanningInsightsDashboardCard()
+
+                        // Goals & action items
                         GoalsDashboardCard()
+                        ReviewDashboardCard(store: $store)
+
+                        // Recurring & shared
                         SubscriptionsDashboardCard()
                         HouseholdDashboardCard(store: $store)
+
+                        // Analytical
                         paymentBreakdownCard
                         advisorInsightsCard
                     }
@@ -785,44 +788,42 @@ private struct DashboardView: View {
             .navigationTitle("Dashboard")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // 🔴 دکمه حذف کل ماه (سمت چپ)
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        // If there is nothing to delete for the selected month, show a message instead of asking again.
-                        let hasTx = !Analytics.monthTransactions(store: store).isEmpty
-                        let hasBudget = store.budgetTotal > 0
-                        let hasCaps = store.totalCategoryBudgets() > 0
-                        let hasAnything = hasTx || hasBudget || hasCaps
-
-                        if hasAnything {
-                            showDeleteMonthConfirm = true
-                        } else {
-                            trashAlertText = "This month has already been cleared. There is nothing left to delete."
-                            showTrashAlert = true
-                        }
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(DS.Colors.danger)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Delete this month")
-                }
-                
                 // 🔄 Sync Status (وسط)
                 ToolbarItem(placement: .principal) {
                     SyncStatusView(store: $store)
+                }
+
+                // ⚙️ Month actions menu (سمت چپ — safe behind menu)
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Button(role: .destructive) {
+                            let hasTx = !Analytics.monthTransactions(store: store).isEmpty
+                            let hasBudget = store.budgetTotal > 0
+                            let hasCaps = store.totalCategoryBudgets() > 0
+                            let hasAnything = hasTx || hasBudget || hasCaps
+
+                            if hasAnything {
+                                showDeleteMonthConfirm = true
+                            } else {
+                                trashAlertText = "This month has already been cleared. There is nothing left to delete."
+                                showTrashAlert = true
+                            }
+                        } label: {
+                            Label("Clear This Month", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(DS.Colors.subtext)
+                    }
+                    .accessibilityLabel("Month actions")
                 }
 
                 // ➕ دکمه اضافه کردن (سمت راست – همونی که داشتی)
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Haptics.medium()
-                        if store.budgetTotal <= 0 {
-                            goToBudget()
-                        } else {
-                            showAdd = true
-                        }
+                        showAdd = true
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 18, weight: .semibold))
@@ -855,11 +856,11 @@ private struct DashboardView: View {
                 if let userId = authManager.currentUser?.uid {
                     store.save(userId: userId)
                     
-                    // Capture the cleared store for the async task
+                    // Push cleared store to cloud via SyncCoordinator
                     let clearedStore = store
                     Task {
-                        try? await supabaseManager.saveStore(clearedStore)
-                        print("✅ Month \(Store.monthKey(monthToDelete)) deleted from cloud")
+                        _ = await SyncCoordinator.shared.pushToCloud(store: clearedStore, userId: userId)
+                        SecureLogger.info("Month data deleted from cloud")
                     }
                 }
                 Haptics.success()
@@ -872,7 +873,7 @@ private struct DashboardView: View {
             Text("This will delete all transactions for this month. This action cannot be undone.")
         }
         .alert("Trash", isPresented: $showTrashAlert) {
-            Button("common.ok", role: .cancel) {}
+            Button("OK", role: .cancel) {}
         } message: {
             Text(trashAlertText)
         }
@@ -926,55 +927,323 @@ private struct DashboardView: View {
         }
     }
 
+    // MARK: - KPI Square
+    private struct KPISquare: View {
+        let title: String
+        let value: String
+        var accentColor: Color? = nil
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(DS.Typography.caption)
+                    .foregroundStyle(DS.Colors.subtext)
+                Text(value)
+                    .font(DS.Typography.number)
+                    .foregroundStyle(accentColor ?? DS.Colors.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(accentColor?.opacity(0.7) ?? DS.Colors.grid, lineWidth: accentColor != nil ? 1.5 : 1)
+            )
+        }
+    }
+
+    @State private var showBudgetBubble = false
+    @State private var showTxCountBubble = false
+
     private var kpis: some View {
         let summary = Analytics.monthSummary(store: store)
         let isOverBudget = summary.remaining < 0
-        
-        // محاسبه income برای رنگ سبز
         let tx = Analytics.monthTransactions(store: store)
         let totalIncome = tx.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
-        let hasSignificantIncome = totalIncome > store.budgetTotal * 10 / 100
-        
+        let budget = store.budgetTotal
+        let spentRatio = budget > 0 ? min(1.0, Double(summary.totalSpent) / Double(budget)) : 0
+
         return VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                KPI(title: "Spent", value: DS.Format.money(summary.totalSpent), isNegative: false)
-                    .frame(maxWidth: .infinity)
-                KPI(
-                    title: "Remaining",
-                    value: DS.Format.money(summary.remaining),
-                    isNegative: isOverBudget,
-                    isPositive: !isOverBudget && hasSignificantIncome
+            // 3 KPI squares
+            HStack(spacing: 10) {
+                KPISquare(
+                    title: "Income",
+                    value: DS.Format.money(totalIncome),
+                    accentColor: totalIncome > 0 ? DS.Colors.positive : nil
                 )
-                    .frame(maxWidth: .infinity)
-                KPI(title: "Daily avg", value: DS.Format.money(summary.dailyAvg), isNegative: false)
-                    .frame(maxWidth: .infinity)
+                KPISquare(
+                    title: "Spent",
+                    value: DS.Format.money(summary.totalSpent),
+                    accentColor: isOverBudget ? DS.Colors.danger : nil
+                )
+                KPISquare(
+                    title: isOverBudget ? "Over" : "Remaining",
+                    value: DS.Format.money(abs(summary.remaining)),
+                    accentColor: isOverBudget ? DS.Colors.danger : summary.remaining > 0 ? DS.Colors.positive : nil
+                )
             }
-            
-            // نمایش تعداد تراکنش‌های باقیمانده برای Free users
-            if !subscriptionManager.isPro {
-                let currentCount = store.transactions.count
-                let freeLimit = 50
-                let remaining = max(0, freeLimit - currentCount)
-                
-                HStack(spacing: 6) {
-                    Image(systemName: remaining > 10 ? "info.circle.fill" : "exclamationmark.triangle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(remaining > 10 ? DS.Colors.subtext : .orange)
-                    
-                    Text("\(currentCount) of \(freeLimit) free transactions used")
-                        .font(.system(size: 12))
-                        .foregroundColor(DS.Colors.subtext)
-                    
-                    Spacer()
+
+            // Compact pill row
+            HStack(spacing: 6) {
+                // Budget % pill — tappable with expandable bubble
+                if budget > 0 {
+                    ZStack(alignment: .top) {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                showBudgetBubble.toggle()
+                                if showBudgetBubble { showTxCountBubble = false }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(DS.Colors.surface2).frame(height: 4)
+                                        Capsule()
+                                            .fill(
+                                                spentRatio > 0.9 ? DS.Colors.danger :
+                                                spentRatio > 0.7 ? DS.Colors.warning :
+                                                DS.Colors.accent
+                                            )
+                                            .frame(width: geo.size.width * spentRatio, height: 4)
+                                    }
+                                }
+                                .frame(width: 28, height: 4)
+
+                                Text("\(Int(spentRatio * 100))%")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(
+                                        spentRatio > 0.9 ? DS.Colors.danger :
+                                        spentRatio > 0.7 ? DS.Colors.warning :
+                                        DS.Colors.subtext
+                                    )
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(DS.Colors.surface, in: Capsule())
+                            .overlay(Capsule().stroke(DS.Colors.grid, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(DS.Colors.surface2)
-                )
+
+                // Daily avg
+                HStack(spacing: 3) {
+                    Image(systemName: "chart.line.downtrend.xyaxis")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text(DS.Format.money(summary.dailyAvg) + "/d")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                }
+                .foregroundStyle(DS.Colors.subtext)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(DS.Colors.surface, in: Capsule())
+                .overlay(Capsule().stroke(DS.Colors.grid, lineWidth: 1))
+
+                Spacer()
+
+                // Transaction count pill — tap to show "Free" label
+                if !subscriptionManager.isPro {
+                    let currentCount = store.transactions.count
+                    let freeLimit = 50
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showTxCountBubble.toggle()
+                            if showTxCountBubble { showBudgetBubble = false }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: currentCount > 40 ? "exclamationmark.triangle.fill" : "number")
+                                .font(.system(size: 9))
+                                .foregroundStyle(currentCount > 40 ? DS.Colors.warning : DS.Colors.subtext)
+                            Text("\(currentCount)/\(freeLimit)")
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                        }
+                        .foregroundStyle(DS.Colors.subtext)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(DS.Colors.surface, in: Capsule())
+                        .overlay(Capsule().stroke(DS.Colors.grid, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            // Budget detail bubble (expands on tap)
+            if showBudgetBubble && budget > 0 {
+                budgetDetailBubble(summary: summary, budget: budget, spentRatio: spentRatio)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.9, anchor: .top).combined(with: .opacity),
+                        removal: .scale(scale: 0.95, anchor: .top).combined(with: .opacity)
+                    ))
+            }
+
+            // Free plan bubble (expands on tap)
+            if showTxCountBubble && !subscriptionManager.isPro {
+                freePlanBubble
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.9, anchor: .top).combined(with: .opacity),
+                        removal: .scale(scale: 0.95, anchor: .top).combined(with: .opacity)
+                    ))
             }
         }
+    }
+
+    // MARK: - Budget Detail Bubble
+    private func budgetDetailBubble(summary: Analytics.MonthSummary, budget: Int, spentRatio: Double) -> some View {
+        let barColor: Color = spentRatio > 0.9 ? DS.Colors.danger : spentRatio > 0.7 ? DS.Colors.warning : DS.Colors.accent
+        let remaining = budget - summary.totalSpent
+        let isOver = remaining < 0
+
+        return VStack(spacing: 10) {
+            // Header
+            HStack {
+                Text("Budget Overview")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DS.Colors.text)
+                Spacer()
+                Text(DS.Format.money(budget))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(DS.Colors.subtext)
+            }
+
+            // Visual gauge
+            VStack(spacing: 0) {
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    ZStack(alignment: .leading) {
+                        // Track
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(DS.Colors.surface2)
+                            .frame(height: 10)
+
+                        // Fill
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(
+                                LinearGradient(
+                                    colors: [barColor.opacity(0.7), barColor],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: w * min(1.0, spentRatio), height: 10)
+
+                        // Threshold markers
+                        Rectangle()
+                            .fill(DS.Colors.warning.opacity(0.6))
+                            .frame(width: 1.5, height: 16)
+                            .offset(x: w * 0.7 - 0.75)
+                        Rectangle()
+                            .fill(DS.Colors.danger.opacity(0.6))
+                            .frame(width: 1.5, height: 16)
+                            .offset(x: w * 0.9 - 0.75)
+
+                        // Scale labels positioned exactly
+                        Text("0%")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(DS.Colors.subtext)
+                            .position(x: 10, y: 24)
+                        Text("70%")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(DS.Colors.warning)
+                            .position(x: w * 0.7, y: 24)
+                        Text("90%")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(DS.Colors.danger)
+                            .position(x: w * 0.9, y: 24)
+                        Text("100%")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(DS.Colors.subtext)
+                            .position(x: w - 14, y: 24)
+                    }
+                }
+                .frame(height: 32)
+            }
+
+            // Spent / Remaining row
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Spent")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(DS.Colors.subtext)
+                    Text(DS.Format.money(summary.totalSpent))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundStyle(DS.Colors.text)
+                }
+                Spacer()
+                VStack(alignment: .center, spacing: 2) {
+                    Text("\(Int(spentRatio * 100))% used")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(barColor)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(isOver ? "Over" : "Left")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(DS.Colors.subtext)
+                    Text(DS.Format.money(abs(remaining)))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundStyle(isOver ? DS.Colors.danger : DS.Colors.positive)
+                }
+            }
+        }
+        .padding(12)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(DS.Colors.grid, lineWidth: 1)
+        )
+    }
+
+    // MARK: - Free Plan Bubble
+    private var freePlanBubble: some View {
+        let currentCount = store.transactions.count
+        let freeLimit = 50
+        let usage = Double(currentCount) / Double(freeLimit)
+        let barColor: Color = usage > 0.8 ? DS.Colors.warning : DS.Colors.accent
+
+        return VStack(spacing: 8) {
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.accent)
+                    Text("Free Plan")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.Colors.text)
+                }
+                Spacer()
+                Text("\(currentCount) of \(freeLimit) transactions")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(DS.Colors.subtext)
+            }
+
+            // Usage bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(DS.Colors.surface2)
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(barColor)
+                        .frame(width: geo.size.width * min(1.0, usage), height: 8)
+                }
+            }
+            .frame(height: 8)
+
+            if currentCount > 40 {
+                Text("You're running low — unlimited transactions Available for Pro Users")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(DS.Colors.warning)
+            }
+        }
+        .padding(12)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(DS.Colors.grid, lineWidth: 1)
+        )
     }
 
     private var trendCard: some View {
@@ -1231,9 +1500,24 @@ private struct DashboardView: View {
 
         return DS.Card {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Category Breakdown")
-                    .font(DS.Typography.section)
-                    .foregroundStyle(DS.Colors.text)
+                HStack {
+                    Image(systemName: "chart.pie.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DS.Colors.accent)
+                    Text("Category Breakdown")
+                        .font(DS.Typography.section)
+                        .foregroundStyle(DS.Colors.text)
+                    Spacer()
+                    Button { goToBudget() } label: {
+                        HStack(spacing: 2) {
+                            Text("Budget")
+                                .font(DS.Typography.caption)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(DS.Colors.subtext)
+                    }
+                }
 
                 if breakdown.isEmpty {
                     Text("No transactions yet")
@@ -1792,12 +2076,7 @@ private struct TransactionsView: View {
     private var transactionsContent: some View {
         ZStack {
             DS.Colors.bg.ignoresSafeArea()
-
-            if store.budgetTotal <= 0 {
-                noBudgetView
-            } else {
-                transactionsListView
-            }
+            transactionsListView
         }
     }
 
@@ -1827,37 +2106,55 @@ private struct TransactionsView: View {
     
     // MARK: - Helper Views
     
-    private var noBudgetView: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                DS.Card {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Before you add transactions")
-                            .font(DS.Typography.section)
-                            .foregroundStyle(DS.Colors.text)
+    private var noBudgetBanner: some View {
+        Button {
+            goToBudget()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "target")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DS.Colors.warning)
 
-                        Text("Set your budget first")
-                            .font(DS.Typography.body)
-                            .foregroundStyle(DS.Colors.subtext)
-
-                        Button {
-                            goToBudget()
-                        } label: {
-                            HStack {
-                                Image(systemName: "target")
-                                Text("Set Budget")
-                            }
-                        }
-                        .buttonStyle(DS.PrimaryButton())
-                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("No budget set")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DS.Colors.text)
+                    Text("Set a budget to unlock full insights")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.subtext)
                 }
+
+                Spacer()
+
+                Text("Set up")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DS.Colors.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(DS.Colors.accent.opacity(0.12), in: Capsule())
             }
-            .padding(16)
+            .padding(12)
+            .background(DS.Colors.warning.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(DS.Colors.warning.opacity(0.2), lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
     }
     
     private var transactionsListView: some View {
         List {
+            // Budget nudge banner (non-blocking)
+            if store.budgetTotal <= 0 {
+                Section {
+                    noBudgetBanner
+                }
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
             if filtered.isEmpty {
                 emptyStateView
             } else {
@@ -2808,6 +3105,62 @@ private struct BudgetView: View {
                                 }
                             }
                         }
+                        // Shared Budget (household) — only if user is in a household with a shared budget
+                        if HouseholdManager.shared.isInHousehold {
+                            let mk = Store.monthKey(store.selectedMonth)
+                            if let sb = HouseholdManager.shared.sharedBudget(for: mk), sb.totalAmount > 0 {
+                                let sharedSpent = HouseholdManager.shared.sharedSpending(monthKey: mk)
+                                let sharedRemaining = sb.totalAmount - sharedSpent
+                                let isOver = sharedSpent > sb.totalAmount
+
+                                DS.Card {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        HStack {
+                                            Label("Shared Budget", systemImage: "person.2.fill")
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(DS.Colors.accent)
+                                            Spacer()
+                                            if isOver {
+                                                Text("Over budget")
+                                                    .font(.system(size: 10, weight: .bold))
+                                                    .foregroundStyle(DS.Colors.danger)
+                                                    .padding(.horizontal, 7)
+                                                    .padding(.vertical, 3)
+                                                    .background(DS.Colors.danger.opacity(0.1), in: Capsule())
+                                            }
+                                        }
+
+                                        DS.Meter(
+                                            title: "Shared used",
+                                            value: sharedSpent,
+                                            max: max(1, sb.totalAmount),
+                                            hint: "\(DS.Format.percent(Double(sharedSpent) / Double(max(1, sb.totalAmount)))) used"
+                                        )
+
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text("Shared Spent")
+                                                    .font(DS.Typography.caption)
+                                                    .foregroundStyle(DS.Colors.subtext)
+                                                Text(DS.Format.money(sharedSpent))
+                                                    .font(DS.Typography.number)
+                                                    .foregroundStyle(DS.Colors.text)
+                                            }
+                                            Spacer()
+                                            VStack(alignment: .trailing, spacing: 4) {
+                                                Text("Remaining")
+                                                    .font(DS.Typography.caption)
+                                                    .foregroundStyle(DS.Colors.subtext)
+                                                Text(DS.Format.money(sharedRemaining))
+                                                    .font(DS.Typography.number)
+                                                    .foregroundStyle(isOver ? DS.Colors.danger : DS.Colors.text)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         DS.Card {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Category Budgets")
@@ -3899,60 +4252,6 @@ private struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // Support & Account Deletion
-                    DS.Card {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "questionmark.circle.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(DS.Colors.accent)
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Need Help or Want to Delete Account?")
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundStyle(DS.Colors.text)
-                                    
-                                    Text("Contact our support team")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(DS.Colors.subtext)
-                                }
-                                
-                                Spacer()
-                            }
-                            
-                            Divider().overlay(DS.Colors.grid)
-                            
-                            Button {
-                                if let url = URL(string: "mailto:centmond.support@gmail.com?subject=Support%20Request") {
-                                    UIApplication.shared.open(url)
-                                }
-                                Haptics.light()
-                            } label: {
-                                HStack {
-                                    Image(systemName: "envelope.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(DS.Colors.accent)
-                                    
-                                    Text("centmond.support@gmail.com")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundStyle(DS.Colors.accent)
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "arrow.up.right")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(DS.Colors.subtext)
-                                }
-                                .padding(12)
-                                .background(DS.Colors.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    
-                    // Security Settings
-                    
-                    
                     // Backup & Data
                     BackupDataSection(store: $store)
                     
@@ -4010,7 +4309,7 @@ private struct SettingsView: View {
                                 )
                             }
                             
-                            Text("Theme preference (coming soon)")
+                            Text("Choose your preferred appearance")
                                 .font(DS.Typography.caption)
                                 .foregroundStyle(DS.Colors.subtext)
                         }
@@ -4140,9 +4439,9 @@ private struct SettingsView: View {
                                 
                                 // Show Onboarding
                                 Button {
-                                    UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
-
                                     Haptics.light()
+                                    OnboardingManager.shared.resetOnboarding()
+                                    OnboardingManager.shared.startOnboarding()
                                 } label: {
                                     supportRow(
                                         icon: "play.circle.fill",
@@ -4412,6 +4711,88 @@ private struct SettingsView: View {
             Spacer()
         }
         .padding(.vertical, 8)
+    }
+}
+
+// MARK: - More Tab
+
+private struct MoreView: View {
+    @Binding var store: Store
+    @Binding var selectedTab: Tab
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 10) {
+                    NavigationLink { AccountsListView() } label: {
+                        moreRowLabel(icon: "building.columns", title: "Accounts", subtitle: "Net worth & balances", color: Color(hexValue: 0x667EEA))
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink { GoalsOverviewView() } label: {
+                        moreRowLabel(icon: "flag.fill", title: "Goals", subtitle: "Savings targets & progress", color: DS.Colors.positive)
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink { SubscriptionsOverviewView() } label: {
+                        moreRowLabel(icon: "creditcard.and.123", title: "Subscriptions", subtitle: "Recurring charges & alerts", color: Color(hexValue: 0xFF9F0A))
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink { HouseholdOverviewView(store: $store) } label: {
+                        moreRowLabel(icon: "person.2.fill", title: "Household", subtitle: "Shared finance & split expenses", color: DS.Colors.accent)
+                    }
+                    .buttonStyle(.plain)
+
+                    Divider().overlay(DS.Colors.grid).padding(.vertical, 4)
+
+                    NavigationLink { SettingsView(store: $store) } label: {
+                        moreRowLabel(icon: "gearshape.fill", title: "Settings", subtitle: "Account, backup & preferences", color: DS.Colors.subtext)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 24)
+            }
+            .background(DS.Colors.bg.ignoresSafeArea())
+            .navigationTitle("More")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func moreRowLabel(icon: String, title: String, subtitle: String, color: Color) -> some View {
+        HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(color.opacity(0.12))
+                .frame(width: 40, height: 40)
+                .overlay(
+                    Image(systemName: icon)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(color)
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DS.Colors.text)
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DS.Colors.subtext)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(DS.Colors.subtext.opacity(0.4))
+        }
+        .padding(12)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(DS.Colors.grid, lineWidth: 1)
+        )
     }
 }
 
@@ -5233,6 +5614,18 @@ private struct TransactionRow: View {
                                 .fill(t.paymentMethod.tint.opacity(0.15))
                         )
                     
+                    // Shared/split indicator
+                    if HouseholdManager.shared.isSplitTransaction(t.id) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(DS.Colors.accent)
+                            .padding(3)
+                            .background(
+                                Circle()
+                                    .fill(DS.Colors.accent.opacity(0.12))
+                            )
+                    }
+
                     // علامت اینکه این ترنزکشن اتچمنت دارد
                     if t.attachmentData != nil {
                         Image(systemName: "paperclip")
@@ -5360,12 +5753,48 @@ private struct TransactionInspectSheet: View {
                             }
                         }
                         
+                        // Shared / Split Card
+                        if let split = HouseholdManager.shared.splitExpense(for: transaction.id) {
+                            DS.Card {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    SectionHeader(title: "Shared Expense")
+
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "person.2.fill")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(DS.Colors.accent)
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Split: \(split.splitRule.displayName)")
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(DS.Colors.text)
+
+                                            Text(split.isSettled ? "Settled" : "Unsettled")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundStyle(split.isSettled ? DS.Colors.positive : DS.Colors.warning)
+                                        }
+
+                                        Spacer()
+
+                                        if !split.isSettled {
+                                            Text("Open")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(DS.Colors.warning)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(DS.Colors.warning.opacity(0.1), in: Capsule())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Note Card
                         if !transaction.note.isEmpty {
                             DS.Card {
                                 VStack(alignment: .leading, spacing: 12) {
                                     SectionHeader(title: "Note")
-                                    
+
                                     Text(transaction.note)
                                         .font(.system(size: 15, weight: .regular))
                                         .foregroundStyle(DS.Colors.text)
@@ -9725,9 +10154,10 @@ private struct ImportTransactionsScreen: View {
         if let userId = self.authManager.currentUser?.uid {
             store.save(userId: userId)
             
-            // Also save to cloud
-            Task { try? await Task.sleep(nanoseconds: 100_000_000);
-                try? await self.supabaseManager.saveStore(store)
+            // Push imported data to cloud via SyncCoordinator
+            let importedStore = store
+            Task {
+                _ = await SyncCoordinator.shared.pushToCloud(store: importedStore, userId: userId)
             }
         }
         
